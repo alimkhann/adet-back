@@ -11,6 +11,7 @@ from .exceptions import (InvalidCredentialsException,
                              UserAlreadyExistsException, UserNotFoundException)
 from .schema import User, UserCredentials, UserUpdate, PasswordUpdate
 from .utils import create_access_token, get_password_hash, verify_password
+from .models import User as UserModel
 
 
 class AuthService:
@@ -51,9 +52,9 @@ class AuthService:
 
         # Create new user
         hashed_password = get_password_hash(credentials.password)
-        new_user = User(
+        new_user = UserModel(
             email=credentials.email,
-            username=credentials.username, # Add username here
+            username=credentials.username,
             hashed_password=hashed_password
         )
 
@@ -64,8 +65,15 @@ class AuthService:
             data={"sub": created_user.email}
         )
 
+        refresh_token_expires = timedelta(days=7) # Typically longer than access token
+        refresh_token = create_access_token(
+            data={"sub": created_user.email, "type": "refresh"},
+            expires_delta=refresh_token_expires
+        )
+
         return {
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer"
         }
 

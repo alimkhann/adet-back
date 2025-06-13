@@ -46,4 +46,4 @@ class TokenData(BaseModel):
 class UserCredentials(BaseModel):
     email: EmailStr
     password: str
-    username: Optional[str] = None
+    username: str

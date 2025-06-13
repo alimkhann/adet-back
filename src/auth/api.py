@@ -1,14 +1,16 @@
 from fastapi import APIRouter, Body, Depends, status, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
+from pydantic import BaseModel, EmailStr
 
 from .dependencies import get_current_user
 from .exceptions import (InvalidCredentialsException,
                              UserAlreadyExistsException, raise_http_exception,
                              InvalidTokenException, UserNotFoundException)
-from .schema import Token, User, UserCredentials, UserUpdate, PasswordUpdate
+from .schema import Token, User, UserCredentials, UserUpdate, PasswordUpdate, UsernameUpdate
 from .service import AuthService
 from ..database import get_async_db
+
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -62,16 +64,20 @@ async def read_users_me(current_user: User = Depends(get_current_user)):
 @router.put(
     "/me",
     response_model=User,
-    summary="Update Current User Profile",
-    description="Updates the profile information (email or username) for the currently authenticated user."
+    summary="Update Current User Profile (Username Only)",
+    description="Updates the username for the currently authenticated user."
 )
 async def update_users_me(
-    user_update: UserUpdate = Body(...),
+    user_update: UsernameUpdate = Body(...),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        updated_user = await AuthService.update_user_profile(current_user.id, user_update, db)
+        updated_user = await AuthService.update_username(
+            user_id=current_user.id,
+            username=user_update.username,
+            db=db
+        )
         return updated_user
     except (UserNotFoundException, InvalidTokenException, UserAlreadyExistsException) as e:
         raise_http_exception(e)

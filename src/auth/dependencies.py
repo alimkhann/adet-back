@@ -19,11 +19,7 @@ async def get_current_user(
     try:
         email = decode_access_token(token)
         db_user = await UserDAO.get_user_by_email_or_raise(email, db)
-        return User(
-            id=db_user.id,
-            email=db_user.email,
-            username=db_user.username # Assuming username is part of the User model
-        )
+        return db_user
     except (
         InvalidTokenException,
         TokenExpiredException,

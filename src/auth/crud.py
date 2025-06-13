@@ -19,7 +19,10 @@ class UserDAO:
         try:
             query = select(User).where(User.email == email)
             result = await db.execute(query)
-            return result.scalars().first()
+            user = result.scalars().first()
+            if user:
+                await db.refresh(user)
+            return user
         except Exception as e:
             raise DatabaseException(f"get_user_by_email: {str(e)}")
 
@@ -29,7 +32,10 @@ class UserDAO:
         try:
             query = select(User).where(User.id == user_id)
             result = await db.execute(query)
-            return result.scalars().first()
+            user = result.scalars().first()
+            if user:
+                await db.refresh(user)
+            return user
         except Exception as e:
             raise DatabaseException(f"get_user_by_id: {str(e)}")
 

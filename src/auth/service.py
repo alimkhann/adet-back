@@ -32,8 +32,15 @@ class AuthService:
             expires_delta=access_token_expires
         )
 
+        refresh_token_expires = timedelta(days=7) # Typically longer than access token
+        refresh_token = create_access_token(
+            data={"sub": user.email, "type": "refresh"},
+            expires_delta=refresh_token_expires
+        )
+
         return {
             "access_token": access_token,
+            "refresh_token": refresh_token,
             "token_type": "bearer"
         }
 
@@ -78,27 +85,19 @@ class AuthService:
         }
 
     @staticmethod
-    async def get_user_profile(user_id: int, db: AsyncSession) -> User:
-        """Get user profile by ID."""
-        return await UserDAO.get_user_by_id_or_raise(user_id, db)
+    async def get_user_profile(email: str, db: AsyncSession) -> User:
+        """Get user profile by email."""
+        return await UserDAO.get_user_by_email_or_raise(email, db)
 
     @staticmethod
-    async def update_user_profile(
+    async def update_username(
         user_id: int,
-        user_update: UserUpdate,
+        username: str,
         db: AsyncSession
     ) -> User:
-        """Update user profile (email, username)."""
+        """Update user username."""
         user = await UserDAO.get_user_by_id_or_raise(user_id, db)
-
-        if user_update.email and user_update.email != user.email:
-            if await UserDAO.user_exists(user_update.email, db):
-                raise UserAlreadyExistsException(user_update.email)
-            user.email = user_update.email
-
-        if user_update.username and user_update.username != user.username:
-            user.username = user_update.username
-
+        user.username = username
         return await UserDAO.update_user(user, db)
 
     @staticmethod

@@ -28,6 +28,10 @@ class UserUpdate(BaseModel):
     username: Optional[str] = None
 
 
+class UsernameUpdate(BaseModel):
+    username: str
+
+
 class PasswordUpdate(BaseModel):
     current_password: str
     new_password: str
@@ -47,3 +51,8 @@ class UserCredentials(BaseModel):
     email: EmailStr
     password: str
     username: str
+
+
+class LoginCredentials(BaseModel):
+    email: EmailStr
+    password: str

@@ -46,7 +46,8 @@ async def register_user(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        return await AuthService.register_user(credentials, db)
+        token_response = await AuthService.register_user(credentials, db)
+        return token_response
     except UserAlreadyExistsException as e:
         raise_http_exception(e)
 

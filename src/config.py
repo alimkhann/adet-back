@@ -4,9 +4,7 @@ import os
 class Settings(BaseSettings):
     database_url: str
     sync_database_url: str
-    secret_key: str
-    algorithm: str
-    access_token_expire_minutes: int
+    clerk_domain: str
     # redis_url: str = "redis://localhost:6379/0"
     # celery_broker_url: str = "redis://localhost:6379/0"
     # celery_result_backend: str = "redis://localhost:6379/0"

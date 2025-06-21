@@ -1,9 +1,10 @@
 import os
-from fastapi import Depends, Request
+from fastapi import Depends, Request, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.ext.asyncio import AsyncSession
 import httpx
-import jwt
+from jose import jwt
+from jose.exceptions import JWTError, ExpiredSignatureError
 from .crud import UserDAO
 from .models import User
 from ..database import get_async_db
@@ -21,38 +22,96 @@ bearer_scheme = HTTPBearer()
 _jwks_cache = None
 
 async def get_clerk_public_keys():
+    """
+    Retrieves and caches Clerk's JWKS public keys.
+    The JWKS URL is derived from the Clerk domain in your settings.
+    """
     global _jwks_cache
-    if _jwks_cache is not None:
-        return _jwks_cache
-    async with httpx.AsyncClient() as client:
-        resp = await client.get(CLERK_JWKS_URL)
-        resp.raise_for_status()
-        _jwks_cache = resp.json()
+    if _jwks_cache:
         return _jwks_cache
 
-def get_email_from_clerk_claims(payload):
-    # Clerk JWTs have 'email' or 'sub' (user id). Prefer email for user lookup.
-    return payload.get('email') or payload.get('sub')
+    jwks_url = CLERK_JWKS_URL
+
+    async with httpx.AsyncClient() as client:
+        try:
+            resp = await client.get(jwks_url)
+            resp.raise_for_status()
+            _jwks_cache = resp.json()["keys"]
+            return _jwks_cache
+        except httpx.RequestError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail=f"Could not connect to Clerk JWKS endpoint: {exc}",
+            )
+        except httpx.HTTPStatusError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail=f"Error fetching Clerk JWKS: {exc.response.text}",
+            )
 
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(bearer_scheme),
-    db: AsyncSession = Depends(get_async_db)
+    db: AsyncSession = Depends(get_async_db),
 ) -> User:
+    """
+    Decodes the Clerk JWT, verifies it, and retrieves or creates the user
+    in the local database.
+    """
     token = credentials.credentials
     jwks = await get_clerk_public_keys()
+
     try:
-        payload = jwt.decode(token, jwks, algorithms=["RS256"], options={"verify_aud": False})
-    except Exception:
-        from .exceptions import InvalidTokenException, raise_http_exception
-        raise_http_exception(InvalidTokenException())
-    email = get_email_from_clerk_claims(payload)
-    if not email:
-        from .exceptions import InvalidTokenException, raise_http_exception
-        raise_http_exception(InvalidTokenException())
-    # Auto-provision user if not exists
-    user = await UserDAO.get_user_by_email(email, db)
+        unverified_header = jwt.get_unverified_header(token)
+        rsa_key = {}
+        for key in jwks:
+            if key["kid"] == unverified_header["kid"]:
+                rsa_key = {
+                    "kty": key["kty"],
+                    "kid": key["kid"],
+                    "use": key["use"],
+                    "n": key["n"],
+                    "e": key["e"],
+                }
+                break
+
+        if not rsa_key:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token header"
+            )
+
+        payload = jwt.decode(
+            token, rsa_key, algorithms=["RS256"], issuer=f"https://{settings.clerk_domain}"
+        )
+
+    except ExpiredSignatureError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Token has expired"
+        )
+    except JWTError as e:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail=f"Invalid token: {e}"
+        )
+
+    clerk_id = payload.get("sub")
+    if not clerk_id:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: no sub claim"
+        )
+
+    # As per your confirmation, 'username' is a custom claim from your Clerk JWT template
+    username = payload.get("username", f"user_{clerk_id[:8]}")
+
+    # This DAO method will be implemented in the next step.
+    # It finds a user by clerk_id or creates one if they don't exist.
+    user = await UserDAO.get_or_create_user_by_clerk_id(
+        db=db, clerk_id=clerk_id, username=username
+    )
+
     if not user:
-        from .models import User as UserModel
-        user = UserModel(email=email, username=email.split('@')[0])
-        user = await UserDAO.create_user(user, db)
+        # This case should not be reached if the DAO method is correct
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not retrieve or create user.",
+        )
+
     return user

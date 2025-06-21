@@ -35,16 +35,14 @@ target_metadata = Base.metadata
 
 def get_url():
     """Get database URL from environment or config."""
-    # Try to get from environment first (for Docker)
-    database_url = os.getenv("DATABASE_URL")
-    if database_url:
-        # Convert to async URL if needed
-        if database_url.startswith("postgresql://"):
-            database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
-        return database_url
-    
-    # Fallback to config
-    return config.get_main_option("sqlalchemy.url")
+    # Try to get from environment first (for Docker) or fallback to config
+    database_url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
+
+    # Convert to async URL if needed
+    if database_url and database_url.startswith("postgresql://"):
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+
+    return database_url
 
 
 def run_migrations_offline() -> None:
@@ -85,7 +83,7 @@ async def run_async_migrations() -> None:
     """
     configuration = config.get_section(config.config_ini_section)
     configuration["sqlalchemy.url"] = get_url()
-    
+
     connectable = async_engine_from_config(
         configuration,
         prefix="sqlalchemy.",

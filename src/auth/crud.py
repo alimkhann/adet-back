@@ -12,23 +12,44 @@ from .models import User
 class UserDAO:
 
     @staticmethod
-    async def get_user_by_email(
-        email: str, db: AsyncSession
-    ) -> Optional[User]:
-        """Get user by email address."""
+    async def get_or_create_user_by_clerk_id(
+        db: AsyncSession, clerk_id: str, username: str
+    ) -> User:
+        """
+        Retrieves a user by their Clerk ID. If the user does not exist,
+        it creates a new one with the provided Clerk ID and username.
+        """
         try:
-            query = select(User).where(User.email == email)
+            # First, try to get the user
+            query = select(User).where(User.clerk_id == clerk_id)
             result = await db.execute(query)
             user = result.scalars().first()
+
             if user:
-                await db.refresh(user)
-            return user
+                # Optional: Update username if it has changed in Clerk
+                if user.username != username:
+                    user.username = username
+                    await db.commit()
+                    await db.refresh(user)
+                return user
+
+            # If user does not exist, create a new one
+            new_user = User(clerk_id=clerk_id, username=username)
+            db.add(new_user)
+            await db.commit()
+            await db.refresh(new_user)
+            return new_user
+
+        except IntegrityError:  # Should not happen with get-or-create logic, but as a safeguard
+            await db.rollback()
+            raise UserAlreadyExistsException(f"User with clerk_id {clerk_id} already exists.")
         except Exception as e:
-            raise DatabaseException(f"get_user_by_email: {str(e)}")
+            await db.rollback()
+            raise DatabaseException(f"get_or_create_user_by_clerk_id: {str(e)}")
 
     @staticmethod
     async def get_user_by_id(user_id: int, db: AsyncSession) -> Optional[User]:
-        """Get user by ID."""
+        """Get user by internal database ID."""
         try:
             query = select(User).where(User.id == user_id)
             result = await db.execute(query)
@@ -40,21 +61,6 @@ class UserDAO:
             raise DatabaseException(f"get_user_by_id: {str(e)}")
 
     @staticmethod
-    async def create_user(user: User, db: AsyncSession) -> User:
-        """Create a new user."""
-        try:
-            db.add(user)
-            await db.commit()
-            await db.refresh(user)
-            return user
-        except IntegrityError:
-            await db.rollback()
-            raise UserAlreadyExistsException(user.email)
-        except Exception as e:
-            await db.rollback()
-            raise DatabaseException(f"create_user: {str(e)}")
-
-    @staticmethod
     async def update_user(user: User, db: AsyncSession) -> User:
         """Update an existing user."""
         try:
@@ -63,7 +69,7 @@ class UserDAO:
             return user
         except IntegrityError:
             await db.rollback()
-            raise UserAlreadyExistsException(user.email)
+            raise UserAlreadyExistsException(f"Integrity error on user update for clerk_id: {user.clerk_id}")
         except Exception as e:
             await db.rollback()
             raise DatabaseException(f"update_user: {str(e)}")
@@ -80,30 +86,7 @@ class UserDAO:
             raise DatabaseException(f"delete_user: {str(e)}")
 
     @staticmethod
-    async def user_exists(email: str, db: AsyncSession) -> bool:
-        """Check if user exists by email."""
-        try:
-            user = await UserDAO.get_user_by_email(email, db)
-            return user is not None
-        except DatabaseException:
-            raise
-        except Exception as e:
-            raise DatabaseException(f"user_exists: {str(e)}")
-
-    @staticmethod
-    async def get_user_by_email_or_raise(
-        email: str, db: AsyncSession
-    ) -> User:
-        """Get user by email or raise UserNotFoundException."""
-        user = await UserDAO.get_user_by_email(email, db)
-        if user is None:
-            raise UserNotFoundException(email)
-        return user
-
-    @staticmethod
-    async def get_user_by_id_or_raise(
-        user_id: int, db: AsyncSession
-    ) -> User:
+    async def get_user_by_id_or_raise(user_id: int, db: AsyncSession) -> User:
         """Get user by ID or raise UserNotFoundException."""
         user = await UserDAO.get_user_by_id(user_id, db)
         if user is None:

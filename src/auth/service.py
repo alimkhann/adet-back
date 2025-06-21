@@ -9,11 +9,6 @@ from .models import User as UserModel
 
 class AuthService:
     @staticmethod
-    async def get_user_profile(email: str, db: AsyncSession) -> User:
-        """Get user profile by email."""
-        return await UserDAO.get_user_by_email_or_raise(email, db)
-
-    @staticmethod
     async def update_username(
         user_id: int,
         username: str,

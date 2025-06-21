@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Body, Depends, status
+from fastapi import APIRouter, Body, Depends, status, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from .dependencies import get_current_user
-from .exceptions import (UserAlreadyExistsException, raise_http_exception, InvalidTokenException, UserNotFoundException)
+from .exceptions import UserNotFoundException, UserAlreadyExistsException
 from .schema import User, UsernameUpdate
 from .service import AuthService
 from ..database import get_async_db
@@ -29,14 +29,15 @@ async def update_users_me(
     db: AsyncSession = Depends(get_async_db)
 ):
     try:
-        updated_user = await AuthService.update_username(
+        return await AuthService.update_username(
             user_id=current_user.id,
             username=user_update.username,
             db=db
         )
-        return updated_user
-    except (UserNotFoundException, InvalidTokenException, UserAlreadyExistsException) as e:
-        raise_http_exception(e)
+    except UserNotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except UserAlreadyExistsException as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.delete(
     "/me",
@@ -50,6 +51,6 @@ async def delete_current_user_account(
 ):
     try:
         await AuthService.delete_user_account(current_user.id, db)
-        return {"message": "User account deleted successfully"}
-    except (UserNotFoundException, InvalidTokenException) as e:
-        raise_http_exception(e)
+        return
+    except UserNotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))

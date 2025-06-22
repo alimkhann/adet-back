@@ -2,7 +2,7 @@ from pydantic import BaseModel
 
 class OnboardingAnswerBase(BaseModel):
     habit_name: str
-    habit_description: str | None = None
+    habit_description: str
     frequency: str
     validation_time: str
     difficulty: str

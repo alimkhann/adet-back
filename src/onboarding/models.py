@@ -9,7 +9,7 @@ class OnboardingAnswer(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
 
     habit_name = Column(String, nullable=False)
-    habit_description = Column(String, nullable=True)
+    habit_description = Column(String, nullable=False)
     frequency = Column(String, nullable=False)
     validation_time = Column(String, nullable=False)
     difficulty = Column(String, nullable=False)

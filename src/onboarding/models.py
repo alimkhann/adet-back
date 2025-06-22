@@ -1,18 +1,18 @@
-from sqlalchemy import Column, Integer, String, Boolean, DateTime, ForeignKey
-from sqlalchemy.sql import func
+from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
+from src.database import Base
 
-from ..database import Base
-
-class OnboardingProgress(Base):
-    __tablename__ = "onboarding_progress"
+class OnboardingAnswer(Base):
+    __tablename__ = "onboarding_answers"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), unique=True, nullable=False)
-    current_step = Column(String, default="start")
-    is_completed = Column(Boolean, default=False)
-    data = Column(String, nullable=True) # To store JSON string of answers/preferences
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), unique=True, nullable=False)
 
-    user = relationship("User", back_populates="onboarding_progress")
+    habit_name = Column(String, nullable=False)
+    habit_description = Column(String, nullable=True)
+    frequency = Column(String, nullable=False)
+    validation_time = Column(String, nullable=False)
+    difficulty = Column(String, nullable=False)
+    proof_style = Column(String, nullable=False)
+
+    user = relationship("User", back_populates="onboarding_answer", passive_deletes=True)

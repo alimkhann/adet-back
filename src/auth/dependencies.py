@@ -15,7 +15,12 @@ load_dotenv()
 
 CLERK_DOMAIN = os.getenv("CLERK_DOMAIN")
 
-CLERK_JWKS_URL = f"https://clerk.{CLERK_DOMAIN}.com/.well-known/jwks.json"
+# Correctly construct the Clerk JWKS URL and issuer
+if not CLERK_DOMAIN:
+    raise ValueError("CLERK_DOMAIN environment variable not set")
+
+CLERK_JWKS_URL = f"https://{CLERK_DOMAIN}/.well-known/jwks.json"
+CLERK_ISSUER = f"https://{CLERK_DOMAIN}"
 
 bearer_scheme = HTTPBearer()
 
@@ -80,7 +85,7 @@ async def get_current_user(
             )
 
         payload = jwt.decode(
-            token, rsa_key, algorithms=["RS256"], issuer=f"https://{settings.clerk_domain}"
+            token, rsa_key, algorithms=["RS256"], issuer=CLERK_ISSUER
         )
 
     except ExpiredSignatureError:
@@ -98,13 +103,19 @@ async def get_current_user(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token: no sub claim"
         )
 
-    # As per your confirmation, 'username' is a custom claim from your Clerk JWT template
-    username = payload.get("username", f"user_{clerk_id[:8]}")
+    # Extract email and username from Clerk JWT
+    # Email might not be in JWT by default, so we'll make it optional for now
+    email = payload.get("email")
+    username = payload.get("username")
+
+    # If email is not in JWT, we'll use a placeholder and update it later
+    if not email:
+        email = f"user_{clerk_id[:8]}@placeholder.com"  # Temporary placeholder
 
     # This DAO method will be implemented in the next step.
     # It finds a user by clerk_id or creates one if they don't exist.
     user = await UserDAO.get_or_create_user_by_clerk_id(
-        db=db, clerk_id=clerk_id, username=username
+        db=db, clerk_id=clerk_id, email=email, username=username
     )
 
     if not user:

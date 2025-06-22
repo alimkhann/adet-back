@@ -4,7 +4,6 @@ Auth service layer containing business logic for authentication.
 from sqlalchemy.ext.asyncio import AsyncSession
 from .crud import UserDAO
 from .exceptions import UserNotFoundException, UserAlreadyExistsException
-from .schema import User
 from .models import User as UserModel
 
 class AuthService:
@@ -13,7 +12,7 @@ class AuthService:
         user_id: int,
         username: str,
         db: AsyncSession
-    ) -> User:
+    ) -> UserModel:
         """Update user username."""
         user = await UserDAO.get_user_by_id_or_raise(user_id, db)
         user.username = username

@@ -5,6 +5,8 @@ class Settings(BaseSettings):
     database_url: str
     sync_database_url: str
     clerk_domain: str
+    clerk_webhook_secret: str
+    clerk_secret_key: str
     # redis_url: str = "redis://localhost:6379/0"
     # celery_broker_url: str = "redis://localhost:6379/0"
     # celery_result_backend: str = "redis://localhost:6379/0"

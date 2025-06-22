@@ -1,56 +1,145 @@
-from fastapi import APIRouter, Body, Depends, status, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
-from .dependencies import get_current_user
-from .exceptions import UserNotFoundException, UserAlreadyExistsException
-from .schema import User, UsernameUpdate
-from .service import AuthService
-from ..database import get_async_db
+import httpx
 
-router = APIRouter(prefix="/auth", tags=["Authentication"])
+from src.auth.dependencies import get_current_user
+from src.auth.exceptions import UserNotFoundException
+from src.auth.models import User as UserModel
+from src.auth.schema import UserSchema, UsernameUpdateSchema
+from src.auth.service import AuthService
+from src.database import get_async_db
+from src.config import settings
 
-@router.get(
-    "/me",
-    response_model=User,
-    summary="Get Current User Profile",
-    description="Retrieves the profile information for the currently authenticated user based on their Clerk JWT."
-)
-async def read_users_me(current_user: User = Depends(get_current_user)):
+router = APIRouter()
+
+
+@router.get("/me", response_model=UserSchema, summary="Get Current User Profile")
+async def read_users_me(current_user: UserModel = Depends(get_current_user)):
+    """
+    Retrieves the profile information for the currently authenticated user based on their Clerk JWT.
+    """
     return current_user
 
-@router.put(
-    "/me",
-    response_model=User,
-    summary="Update Current User Profile (Username Only)",
-    description="Updates the username for the currently authenticated user."
-)
-async def update_users_me(
-    user_update: UsernameUpdate = Body(...),
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+
+@router.post("/me/sync", response_model=UserSchema, summary="Sync User Data from Clerk")
+async def sync_user_from_clerk(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
+    """
+    Syncs user data from Clerk to update email and other profile information.
+    """
     try:
-        return await AuthService.update_username(
-            user_id=current_user.id,
-            username=user_update.username,
-            db=db
+        # Get the user's Clerk ID
+        clerk_id = current_user.clerk_id
+
+        # Fetch user data from Clerk API
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            headers = {
+                "Authorization": f"Bearer {settings.clerk_secret_key}",
+                "Content-Type": "application/json"
+            }
+
+            response = await client.get(
+                f"https://api.clerk.com/v1/users/{clerk_id}",
+                headers=headers
+            )
+
+            if response.status_code == 200:
+                clerk_user_data = response.json()
+
+                # Extract email and username from Clerk data
+                email = None
+                username = None
+
+                # Get primary email
+                if "email_addresses" in clerk_user_data:
+                    for email_data in clerk_user_data["email_addresses"]:
+                        if email_data.get("id") == clerk_user_data.get("primary_email_address_id"):
+                            email = email_data.get("email_address")
+                            break
+
+                # Get username
+                username = clerk_user_data.get("username")
+
+                # Update user in database
+                updated = False
+                if email and email != current_user.email:
+                    current_user.email = email
+                    updated = True
+                if username and username != current_user.username:
+                    current_user.username = username
+                    updated = True
+
+                if updated:
+                    await db.commit()
+                    await db.refresh(current_user)
+
+                return current_user
+            else:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="Failed to fetch user data from Clerk"
+                )
+
+    except httpx.TimeoutException:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="Timeout while syncing user data from Clerk"
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Error syncing user data: {str(e)}"
+        )
+
+
+@router.patch("/me/username", status_code=status.HTTP_204_NO_CONTENT, summary="Update Username")
+async def update_username(
+    username_update: UsernameUpdateSchema,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Updates the username for the currently authenticated user.
+    """
+    try:
+        await AuthService.update_username(
+            user_id=current_user.id, username=username_update.username, db=db
         )
     except UserNotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except UserAlreadyExistsException as e:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update username: {str(e)}"
+        )
 
-@router.delete(
-    "/me",
-    status_code=status.HTTP_204_NO_CONTENT,
-    summary="Delete Current User Account",
-    description="Deletes the account of the currently authenticated user."
-)
-async def delete_current_user_account(
-    current_user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db)
+
+@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT, summary="Delete User Account")
+async def delete_account(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
 ):
+    """
+    Deletes the currently authenticated user's account.
+    This will remove all user data from the database.
+    The user should also delete their account from Clerk separately.
+    """
     try:
-        await AuthService.delete_user_account(current_user.id, db)
-        return
+        # Delete user from database
+        await AuthService.delete_user_account(
+            user_id=current_user.id, db=db
+        )
+
+        # Note: User should delete their Clerk account separately
+        # We could potentially call Clerk API here to delete the user,
+        # but that would require additional permissions and error handling
+
     except UserNotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to delete account: {str(e)}"
+        )

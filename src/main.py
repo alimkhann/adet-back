@@ -1,24 +1,29 @@
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, APIRouter
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
+from contextlib import asynccontextmanager
 
 from fastapi.middleware.cors import CORSMiddleware
 
 from . import models
-from .database import async_engine, get_async_db
+from .database import async_engine, get_async_db, init_db, close_db
 from .auth.api import router as auth_router
 from .onboarding.api import router as onboarding_router
+from .webhooks.api import router as webhooks_router
 
-# from pydantic import BaseModel
-# from fastapi.security import HTTPBearer
 
-# models.Base.metadata.create_all(bind=async_engine) # Remove this line
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await init_db()
+    yield
+    await close_db()
 
 app = FastAPI(
     title="ädet FastAPI PostgreSQL Project",
     description="A FastAPI backend with PostgreSQL database",
-    version="1.0.0"
+    version="1.0.0",
+    lifespan=lifespan
 )
 
 app.add_middleware(
@@ -34,8 +39,13 @@ async def startup_event():
     async with async_engine.begin() as conn:
         await conn.run_sync(models.Base.metadata.create_all)
 
-app.include_router(auth_router)
-app.include_router(onboarding_router)
+# Main API router with versioning
+api_router = APIRouter(prefix="/api/v1")
+api_router.include_router(auth_router, prefix="/users", tags=["Users"])
+api_router.include_router(onboarding_router, tags=["Onboarding"])
+
+app.include_router(api_router)
+app.include_router(webhooks_router) # Webhooks are not versioned with the API
 
 @app.get("/")
 async def root():

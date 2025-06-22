@@ -11,6 +11,7 @@ from .database import async_engine, get_async_db, init_db, close_db
 from .auth.api import router as auth_router
 from .onboarding.api import router as onboarding_router
 from .webhooks.api import router as webhooks_router
+from .habits.api import router as habits_router
 
 
 @asynccontextmanager
@@ -43,6 +44,7 @@ async def startup_event():
 api_router = APIRouter(prefix="/api/v1")
 api_router.include_router(auth_router, prefix="/users", tags=["Users"])
 api_router.include_router(onboarding_router, prefix="/onboarding", tags=["Onboarding"])
+api_router.include_router(habits_router, prefix="/habits", tags=["Habits"])
 
 app.include_router(api_router)
 app.include_router(webhooks_router, tags=["webhooks"])

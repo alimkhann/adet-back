@@ -13,6 +13,7 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '..', 'src'))
 from src.database import Base
 from src.auth.models import User
 from src.onboarding.models import OnboardingAnswer
+from src.habits.models import Habit
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

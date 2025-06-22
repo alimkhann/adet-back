@@ -6,7 +6,7 @@ async def get_habits_by_user(db: AsyncSession, user_id: int):
     result = await db.execute(select(models.Habit).filter(models.Habit.user_id == user_id))
     return result.scalars().all()
 
-async def get_habit(db: AsyncSession, habit_id: str, user_id: int):
+async def get_habit(db: AsyncSession, habit_id: int, user_id: int):
     result = await db.execute(
         select(models.Habit).filter(
             models.Habit.id == habit_id,

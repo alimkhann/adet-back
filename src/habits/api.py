@@ -26,7 +26,7 @@ async def create_habit(
 
 @router.put("/{habit_id}", response_model=schemas.Habit)
 async def update_habit(
-    habit_id: str,
+    habit_id: int,
     habit: schemas.HabitCreate,
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
@@ -34,11 +34,11 @@ async def update_habit(
     db_habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
     if db_habit is None:
         raise HTTPException(status_code=404, detail="Habit not found")
-    return await crud.update_habit(db=db, habit_id=habit_id, habit=habit, user_id=current_user.id)
+    return await crud.update_habit(db=db, habit_id=habit_id, habit_data=habit, user_id=current_user.id)
 
 @router.delete("/{habit_id}")
 async def delete_habit(
-    habit_id: str,
+    habit_id: int,
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):

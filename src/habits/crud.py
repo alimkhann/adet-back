@@ -1,5 +1,5 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select, update
+from sqlalchemy import select
 from . import models, schemas
 
 async def get_habits_by_user(db: AsyncSession, user_id: int):
@@ -51,3 +51,54 @@ async def delete_habit(db: AsyncSession, habit_id: int, user_id: int):
         await db.delete(db_habit)
         await db.commit()
     return db_habit
+
+# --- Motivation/Ability CRUD ---
+from sqlalchemy import select
+from .models import MotivationEntry, AbilityEntry
+
+def _habit_id(habit_id):
+    return int(habit_id)
+
+async def get_motivation_entry(db: AsyncSession, user_id: str, habit_id: str, date):
+    result = await db.execute(
+        select(MotivationEntry).filter(
+            MotivationEntry.user_id == user_id,
+            MotivationEntry.habit_id == _habit_id(habit_id),
+            MotivationEntry.date == date
+        )
+    )
+    return result.scalar_one_or_none()
+
+async def create_motivation_entry(db: AsyncSession, user_id: str, entry):
+    db_entry = MotivationEntry(
+        user_id=user_id,
+        habit_id=_habit_id(entry.habit_id),
+        date=entry.date,
+        level=entry.level
+    )
+    db.add(db_entry)
+    await db.commit()
+    await db.refresh(db_entry)
+    return db_entry
+
+async def get_ability_entry(db: AsyncSession, user_id: str, habit_id: str, date):
+    result = await db.execute(
+        select(AbilityEntry).filter(
+            AbilityEntry.user_id == user_id,
+            AbilityEntry.habit_id == _habit_id(habit_id),
+            AbilityEntry.date == date
+        )
+    )
+    return result.scalar_one_or_none()
+
+async def create_ability_entry(db: AsyncSession, user_id: str, entry):
+    db_entry = AbilityEntry(
+        user_id=user_id,
+        habit_id=_habit_id(entry.habit_id),
+        date=entry.date,
+        level=entry.level
+    )
+    db.add(db_entry)
+    await db.commit()
+    await db.refresh(db_entry)
+    return db_entry

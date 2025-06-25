@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
+from datetime import date
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
@@ -47,3 +48,45 @@ async def delete_habit(
         raise HTTPException(status_code=404, detail="Habit not found")
     await crud.delete_habit(db=db, habit_id=habit_id, user_id=current_user.id)
     return {"message": "Habit deleted successfully"}
+
+# --- Motivation/Ability Endpoints ---
+
+def _get_user_id(user: UserModel):
+    # Use clerk_id for Motivation/Ability entries
+    return user.clerk_id
+
+@router.post("/{habit_id}/motivation", response_model=schemas.MotivationEntryRead)
+async def submit_motivation_entry(habit_id: str, entry: schemas.MotivationEntryCreate, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
+    today = entry.date
+    user_id = _get_user_id(current_user)
+    existing = await crud.get_motivation_entry(db, user_id, habit_id, today)
+    if existing:
+        raise HTTPException(status_code=400, detail="Motivation entry already exists for today.")
+    return await crud.create_motivation_entry(db, user_id, entry)
+
+@router.get("/{habit_id}/motivation/today", response_model=schemas.MotivationEntryRead)
+async def get_today_motivation_entry(habit_id: str, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
+    today = date.today()
+    user_id = _get_user_id(current_user)
+    entry = await crud.get_motivation_entry(db, user_id, habit_id, today)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No motivation entry for today.")
+    return entry
+
+@router.post("/{habit_id}/ability", response_model=schemas.AbilityEntryRead)
+async def submit_ability_entry(habit_id: str, entry: schemas.AbilityEntryCreate, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
+    today = entry.date
+    user_id = _get_user_id(current_user)
+    existing = await crud.get_ability_entry(db, user_id, habit_id, today)
+    if existing:
+        raise HTTPException(status_code=400, detail="Ability entry already exists for today.")
+    return await crud.create_ability_entry(db, user_id, entry)
+
+@router.get("/{habit_id}/ability/today", response_model=schemas.AbilityEntryRead)
+async def get_today_ability_entry(habit_id: str, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
+    today = date.today()
+    user_id = _get_user_id(current_user)
+    entry = await crud.get_ability_entry(db, user_id, habit_id, today)
+    if not entry:
+        raise HTTPException(status_code=404, detail="No ability entry for today.")
+    return entry

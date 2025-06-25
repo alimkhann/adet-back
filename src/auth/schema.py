@@ -28,6 +28,7 @@ class ProfileImageUpdateSchema(BaseModel):
 
 
 class ProfileUpdateSchema(BaseModel):
+    """Schema for updating user profile fields (name, username, bio)."""
     name: Optional[str] = None
     username: Optional[str] = None
     bio: Optional[str] = None

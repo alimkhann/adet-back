@@ -1,5 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, File, UploadFile
 from sqlalchemy.ext.asyncio import AsyncSession
+from fastapi.responses import StreamingResponse, FileResponse
+import mimetypes
 import httpx
 import os
 import uuid
@@ -307,11 +309,6 @@ async def get_profile_image_raw(current_user: UserModel = Depends(get_current_us
     Streams the user's profile image securely from Azure Blob Storage or local storage.
     Only accessible to the authenticated user.
     """
-    from fastapi.responses import StreamingResponse, FileResponse
-    import aiofiles
-    import mimetypes
-    import httpx
-
     image_url = current_user.profile_image_url
     if not image_url:
         raise HTTPException(status_code=404, detail="No profile image set.")

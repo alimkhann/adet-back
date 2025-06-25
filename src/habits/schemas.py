@@ -1,5 +1,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional
+from datetime import date
+from .models import MotivationLevel, AbilityLevel
 
 class HabitBase(BaseModel):
     name: str
@@ -25,5 +27,35 @@ class Habit(HabitBase):
     user_id: int
     streak: int
 
+    class Config:
+        from_attributes = True
+
+# --- Motivation/Ability Schemas ---
+
+class MotivationEntryBase(BaseModel):
+    habit_id: int
+    date: date
+    level: MotivationLevel
+
+class MotivationEntryCreate(MotivationEntryBase):
+    pass
+
+class MotivationEntryRead(MotivationEntryBase):
+    id: int
+    user_id: str
+    class Config:
+        from_attributes = True
+
+class AbilityEntryBase(BaseModel):
+    habit_id: int
+    date: date
+    level: AbilityLevel
+
+class AbilityEntryCreate(AbilityEntryBase):
+    pass
+
+class AbilityEntryRead(AbilityEntryBase):
+    id: int
+    user_id: str
     class Config:
         from_attributes = True

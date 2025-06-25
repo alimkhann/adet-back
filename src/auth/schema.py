@@ -8,6 +8,8 @@ class UserSchema(BaseModel):
     clerk_id: str
     email: str
     username: Optional[str] = None
+    name: Optional[str] = None
+    bio: Optional[str] = None
     profile_image_url: Optional[str] = None
     is_active: bool
     created_at: datetime
@@ -23,3 +25,9 @@ class UsernameUpdateSchema(BaseModel):
 
 class ProfileImageUpdateSchema(BaseModel):
     profile_image_url: str
+
+
+class ProfileUpdateSchema(BaseModel):
+    name: Optional[str] = None
+    username: Optional[str] = None
+    bio: Optional[str] = None

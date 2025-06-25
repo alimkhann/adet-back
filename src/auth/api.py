@@ -7,7 +7,7 @@ import uuid
 from src.auth.dependencies import get_current_user
 from src.auth.exceptions import UserNotFoundException
 from src.auth.models import User as UserModel
-from src.auth.schema import UserSchema, UsernameUpdateSchema, ProfileImageUpdateSchema
+from src.auth.schema import UserSchema, UsernameUpdateSchema, ProfileImageUpdateSchema, ProfileUpdateSchema
 from src.auth.service import AuthService
 from src.database import get_async_db
 from src.config import settings
@@ -351,3 +351,32 @@ async def get_profile_image_raw(current_user: UserModel = Depends(get_current_us
                 raise HTTPException(status_code=404, detail="Profile image not found at external URL.")
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch image from external URL: {e}")
+
+@router.patch("/me/profile", response_model=UserSchema, summary="Update Profile (name, username, bio)")
+async def update_profile(
+    profile_update: ProfileUpdateSchema,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Updates the name, username, and bio for the currently authenticated user.
+    """
+    try:
+        # Username uniqueness check
+        if profile_update.username and profile_update.username != current_user.username:
+            from sqlalchemy.future import select
+            from src.auth.models import User as UserModel
+            result = await db.execute(select(UserModel).where(UserModel.username == profile_update.username))
+            existing = result.scalars().first()
+            if existing:
+                raise HTTPException(status_code=409, detail="Username already taken.")
+            current_user.username = profile_update.username
+        if profile_update.name is not None:
+            current_user.name = profile_update.name
+        if profile_update.bio is not None:
+            current_user.bio = profile_update.bio
+        await db.commit()
+        await db.refresh(current_user)
+        return current_user
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update profile: {str(e)}")

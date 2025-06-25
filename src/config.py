@@ -12,9 +12,13 @@ class Settings(BaseSettings):
     # celery_result_backend: str = "redis://localhost:6379/0"
     openai_api_key: str
     google_api_key: str
+    azure_storage_connection_string: str | None = None
+    azure_storage_container_name: str = "profile-images"
+    debug: bool = True
 
     model_config = SettingsConfigDict(
-        env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'), env_file_encoding="utf-8"
+        env_file=os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '.env'),
+        env_file_encoding="utf-8"
     )
 
 settings = Settings()

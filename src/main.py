@@ -1,8 +1,10 @@
 from fastapi import Depends, FastAPI, HTTPException, APIRouter
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
+import os
 
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -20,6 +22,9 @@ async def lifespan(app: FastAPI):
     yield
     await close_db()
 
+# Create uploads directory before app initialization
+os.makedirs("uploads/profile_images", exist_ok=True)
+
 app = FastAPI(
     title="ädet FastAPI PostgreSQL Project",
     description="A FastAPI backend with PostgreSQL database",
@@ -27,12 +32,16 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+# Mount static files immediately after app creation
+app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
-    allow_headers=["*"]
+    allow_headers=["*"],
+    max_age=200
 )
 
 @app.on_event("startup")

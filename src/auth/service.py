@@ -19,6 +19,27 @@ class AuthService:
         return await UserDAO.update_user(user, db)
 
     @staticmethod
+    async def update_profile_image(
+        user_id: int,
+        profile_image_url: str,
+        db: AsyncSession
+    ) -> UserModel:
+        """Update user profile image URL."""
+        user = await UserDAO.get_user_by_id_or_raise(user_id, db)
+        user.profile_image_url = profile_image_url
+        return await UserDAO.update_user(user, db)
+
+    @staticmethod
+    async def delete_profile_image(
+        user_id: int,
+        db: AsyncSession
+    ) -> UserModel:
+        """Delete user profile image by setting URL to None."""
+        user = await UserDAO.get_user_by_id_or_raise(user_id, db)
+        user.profile_image_url = None
+        return await UserDAO.update_user(user, db)
+
+    @staticmethod
     async def delete_user_account(user_id: int, db: AsyncSession) -> bool:
         """Delete user account."""
         user = await UserDAO.get_user_by_id_or_raise(user_id, db)

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, Field
-from typing import Optional, Literal
-from datetime import date
-from .models import MotivationLevel, AbilityLevel
+from typing import Optional, Literal, List
+from datetime import date, datetime
+from .models import MotivationLevel, AbilityLevel, TaskStatus, ProofType
 
 class HabitBase(BaseModel):
     name: str
@@ -29,6 +29,56 @@ class Habit(HabitBase):
 
     class Config:
         from_attributes = True
+
+# --- Task Completion Schemas ---
+
+class TaskEntryBase(BaseModel):
+    task_description: str
+    difficulty_level: float
+    estimated_duration: int
+    success_criteria: str
+    celebration_message: str
+    easier_alternative: Optional[str] = None
+    harder_alternative: Optional[str] = None
+    anchor_suggestion: Optional[str] = None
+    proof_requirements: str
+
+class TaskEntryCreate(TaskEntryBase):
+    habit_id: int
+    assigned_date: date
+    due_date: datetime
+
+class TaskEntryRead(TaskEntryBase):
+    id: int
+    habit_id: int
+    user_id: int
+    status: str
+    assigned_date: date
+    due_date: datetime
+    completed_at: Optional[datetime] = None
+    proof_type: Optional[str] = None
+    proof_content: Optional[str] = None
+    proof_validation_result: Optional[bool] = None
+    proof_validation_confidence: Optional[float] = None
+    proof_feedback: Optional[str] = None
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+class TaskProofSubmit(BaseModel):
+    proof_type: ProofType
+    proof_content: str = Field(..., description="URL or text content for proof")
+
+class TaskStatusUpdate(BaseModel):
+    status: TaskStatus
+
+class TaskValidationResult(BaseModel):
+    is_valid: bool
+    confidence: float = Field(..., ge=0.0, le=1.0)
+    feedback: str
+    suggestions: List[str] = Field(default_factory=list)
 
 # --- AI Task Generation Schemas ---
 

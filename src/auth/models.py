@@ -25,4 +25,5 @@ class User(Base):
         uselist=False,
         passive_deletes=True
     )
-    habits = relationship("Habit", back_populates="owner", cascade="all, delete-orphan")
+    habits = relationship("Habit", back_populates="user", cascade="all, delete-orphan")
+    task_entries = relationship("TaskEntry", back_populates="user", cascade="all, delete-orphan")

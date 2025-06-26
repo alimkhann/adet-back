@@ -10,10 +10,20 @@ class Settings(BaseSettings):
     # redis_url: str = "redis://localhost:6379/0"
     # celery_broker_url: str = "redis://localhost:6379/0"
     # celery_result_backend: str = "redis://localhost:6379/0"
-    openai_api_key: str
-    google_api_key: str
+
+    # AI Configuration
+    openai_api_key: str | None = None
+    google_api_key: str | None = None
+
+    # Vertex AI Configuration
+    google_cloud_project: str | None = None
+    google_cloud_location: str = "us-central1"
+    google_application_credentials: str | None = None
+
+    # Azure Storage Configuration
     azure_storage_connection_string: str | None = None
     azure_storage_container_name: str = "profile-images"
+
     debug: bool = True
 
     model_config = SettingsConfigDict(

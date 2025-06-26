@@ -1,7 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
@@ -49,6 +49,177 @@ async def delete_habit(
         raise HTTPException(status_code=404, detail="Habit not found")
     await crud.delete_habit(db=db, habit_id=habit_id, user_id=current_user.id)
     return {"message": "Habit deleted successfully"}
+
+# --- Task Completion Endpoints ---
+
+@router.get("/{habit_id}/today-task", response_model=schemas.TaskEntryRead)
+async def get_today_task(
+    habit_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get today's task for a habit"""
+    # Verify habit exists and belongs to user
+    habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+    if not habit:
+        raise HTTPException(status_code=404, detail="Habit not found")
+
+    # Get today's task
+    task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id)
+    if not task:
+        raise HTTPException(status_code=404, detail="No task found for today")
+
+    return task
+
+@router.get("/pending-tasks", response_model=List[schemas.TaskEntryRead])
+async def get_pending_tasks(
+    limit: int = 10,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Get pending tasks for the user"""
+    tasks = await crud.get_pending_tasks(db=db, user_id=current_user.id, limit=limit)
+    return tasks
+
+@router.post("/{habit_id}/generate-and-create-task")
+async def generate_and_create_task(
+    habit_id: int,
+    task_request: schemas.AITaskRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Generate AI task and create it in the database"""
+    try:
+        # Get habit details
+        habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        # Check if task already exists for today
+        existing_task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id)
+        if existing_task:
+            raise HTTPException(status_code=400, detail="Task already exists for today")
+
+        # Get recent performance for context
+        recent_performance = await crud.get_recent_performance(
+            db=db,
+            user_id=current_user.id,
+            habit_id=habit_id,
+            days=7
+        )
+
+        # Create task generation context
+        context = TaskGenerationContext(
+            habit_name=habit.name,
+            habit_description=habit.description or "",
+            base_difficulty=task_request.base_difficulty,
+            motivation_level=task_request.motivation_level,
+            ability_level=task_request.ability_level,
+            proof_style=task_request.proof_style,
+            user_language=task_request.user_language or "en",
+            recent_performance=recent_performance,
+            current_time=datetime.utcnow(),
+            day_of_week=datetime.utcnow().strftime("%A"),
+            user_timezone=task_request.user_timezone or "UTC"
+        )
+
+        # Generate task using AI orchestrator
+        ai_orchestrator = get_ai_orchestrator()
+        response = await ai_orchestrator.generate_personalized_task(
+            context=context,
+            recent_performance=recent_performance
+        )
+
+        if not response.success:
+            raise HTTPException(status_code=500, detail=response.error)
+
+        # Create task in database
+        assigned_date = date.today()
+        due_date = datetime.utcnow() + timedelta(hours=4)  # 4-hour window
+
+        task_entry = await crud.create_task_entry(
+            db=db,
+            habit_id=habit_id,
+            user_id=current_user.id,
+            task_data=response.data,
+            assigned_date=assigned_date,
+            due_date=due_date
+        )
+
+        return {
+            "success": True,
+            "task": task_entry,
+            "ai_metadata": response.metadata
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate and create task: {str(e)}")
+
+@router.post("/tasks/{task_id}/submit-proof")
+async def submit_task_proof(
+    task_id: int,
+    proof_data: schemas.TaskProofSubmit,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Submit proof for a task"""
+    try:
+        # Submit proof
+        task = await crud.submit_task_proof(
+            db=db,
+            task_id=task_id,
+            user_id=current_user.id,
+            proof_type=proof_data.proof_type,
+            proof_content=proof_data.proof_content
+        )
+
+        # TODO: Add AI validation here in Phase 3
+        # For now, mark as validated
+        await crud.validate_task_proof(
+            db=db,
+            task_id=task_id,
+            validation_result=True,
+            confidence=0.8,
+            feedback="Proof submitted successfully"
+        )
+
+        return {
+            "success": True,
+            "task": task,
+            "message": "Proof submitted successfully"
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to submit proof: {str(e)}")
+
+@router.put("/tasks/{task_id}/status")
+async def update_task_status(
+    task_id: int,
+    status_update: schemas.TaskStatusUpdate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Update task status (complete, fail, miss)"""
+    try:
+        task = await crud.update_task_status(
+            db=db,
+            task_id=task_id,
+            user_id=current_user.id,
+            status=status_update.status
+        )
+
+        return {
+            "success": True,
+            "task": task,
+            "message": f"Task status updated to {status_update.status}"
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to update task status: {str(e)}")
 
 # --- AI Task Generation Endpoints ---
 

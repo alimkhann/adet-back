@@ -151,4 +151,6 @@ Thumbs.db
 *.env
 */.env
 
+grand-sphere-v9.json
+
 .cursorignore

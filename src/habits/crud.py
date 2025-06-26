@@ -1,5 +1,7 @@
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy import select
+from sqlalchemy import select, func
+from datetime import datetime, timedelta
+from typing import List, Dict, Any
 from . import models, schemas
 
 async def get_habits_by_user(db: AsyncSession, user_id: int):
@@ -52,6 +54,36 @@ async def delete_habit(db: AsyncSession, habit_id: int, user_id: int):
         await db.commit()
     return db_habit
 
+# --- Performance History CRUD ---
+
+async def get_recent_performance(
+    db: AsyncSession,
+    user_id: int,
+    habit_id: int,
+    days: int = 7
+) -> List[Dict[str, Any]]:
+    """
+    Get recent performance data for AI context
+    This is a placeholder - you'll need to implement based on your task completion model
+    """
+    # TODO: Implement based on your task completion/validation model
+    # For now, return empty list
+    return []
+
+async def get_performance_history(
+    db: AsyncSession,
+    user_id: int,
+    habit_id: int,
+    days: int = 30
+) -> List[Dict[str, Any]]:
+    """
+    Get performance history for analysis
+    This is a placeholder - you'll need to implement based on your task completion model
+    """
+    # TODO: Implement based on your task completion/validation model
+    # For now, return empty list
+    return []
+
 # --- Motivation/Ability CRUD ---
 from sqlalchemy import select
 from .models import MotivationEntry, AbilityEntry
@@ -85,7 +117,7 @@ async def get_ability_entry(db: AsyncSession, user_id: str, habit_id: str, date)
     result = await db.execute(
         select(AbilityEntry).filter(
             AbilityEntry.user_id == user_id,
-            AbilityEntry.habit_id == _habit_id(habit_id),
+            AbilityEntry.habit_id == _habit_id(entry.habit_id),
             AbilityEntry.date == date
         )
     )

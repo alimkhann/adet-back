@@ -1,11 +1,12 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
-from datetime import date
+from datetime import date, datetime
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
 from src.auth.models import User as UserModel
+from src.ai import get_ai_orchestrator, TaskGenerationContext, AIAgentResponse
 from . import crud, schemas
 
 router = APIRouter()
@@ -48,6 +49,190 @@ async def delete_habit(
         raise HTTPException(status_code=404, detail="Habit not found")
     await crud.delete_habit(db=db, habit_id=habit_id, user_id=current_user.id)
     return {"message": "Habit deleted successfully"}
+
+# --- AI Task Generation Endpoints ---
+
+@router.post("/{habit_id}/generate-task")
+async def generate_ai_task(
+    habit_id: int,
+    task_request: schemas.AITaskRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Generate a personalized AI task for the habit using BJ Fogg's Tiny Habits methodology
+    """
+    try:
+        # Get habit details
+        habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        # Get recent performance for context
+        recent_performance = await crud.get_recent_performance(
+            db=db,
+            user_id=current_user.id,
+            habit_id=habit_id,
+            days=7
+        )
+
+        # Create task generation context
+        context = TaskGenerationContext(
+            habit_name=habit.name,
+            habit_description=habit.description or "",
+            base_difficulty=task_request.base_difficulty,
+            motivation_level=task_request.motivation_level,
+            ability_level=task_request.ability_level,
+            proof_style=task_request.proof_style,
+            user_language=task_request.user_language or "en",
+            recent_performance=recent_performance,
+            current_time=datetime.utcnow(),
+            day_of_week=datetime.utcnow().strftime("%A"),
+            user_timezone=task_request.user_timezone or "UTC"
+        )
+
+        # Generate task using AI orchestrator
+        ai_orchestrator = get_ai_orchestrator()
+        response = await ai_orchestrator.generate_personalized_task(
+            context=context,
+            recent_performance=recent_performance
+        )
+
+        if not response.success:
+            raise HTTPException(status_code=500, detail=response.error)
+
+        return {
+            "success": True,
+            "task": response.data,
+            "metadata": response.metadata
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate task: {str(e)}")
+
+@router.post("/{habit_id}/generate-quick-task")
+async def generate_quick_task(
+    habit_id: int,
+    quick_request: schemas.QuickTaskRequest,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Generate a quick task without full context (fallback method)
+    """
+    try:
+        # Get habit details
+        habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        # Generate quick task
+        ai_orchestrator = get_ai_orchestrator()
+        response = await ai_orchestrator.generate_quick_task(
+            habit_name=habit.name,
+            base_difficulty=quick_request.base_difficulty,
+            proof_style=quick_request.proof_style,
+            language=quick_request.user_language or "en"
+        )
+
+        if not response.success:
+            raise HTTPException(status_code=500, detail=response.error)
+
+        return {
+            "success": True,
+            "task": response.data,
+            "metadata": response.metadata
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate quick task: {str(e)}")
+
+@router.get("/{habit_id}/performance-analysis")
+async def analyze_performance(
+    habit_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Analyze habit performance and provide insights
+    """
+    try:
+        # Get habit details
+        habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        # Get performance history
+        performance_history = await crud.get_performance_history(
+            db=db,
+            user_id=current_user.id,
+            habit_id=habit_id,
+            days=30
+        )
+
+        # Analyze performance
+        ai_orchestrator = get_ai_orchestrator()
+        response = await ai_orchestrator.analyze_performance_trends(
+            habit_name=habit.name,
+            performance_history=performance_history,
+            language="en"  # TODO: Get from user preferences
+        )
+
+        if not response.success:
+            raise HTTPException(status_code=500, detail=response.error)
+
+        return {
+            "success": True,
+            "analysis": response.data,
+            "metadata": response.metadata
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to analyze performance: {str(e)}")
+
+@router.get("/{habit_id}/improvement-suggestions")
+async def get_improvement_suggestions(
+    habit_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Get AI-powered improvement suggestions for the habit
+    """
+    try:
+        # Get habit details
+        habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        # Get performance history
+        performance_history = await crud.get_performance_history(
+            db=db,
+            user_id=current_user.id,
+            habit_id=habit_id,
+            days=30
+        )
+
+        # Generate suggestions
+        ai_orchestrator = get_ai_orchestrator()
+        response = await ai_orchestrator.suggest_habit_improvements(
+            habit_name=habit.name,
+            habit_description=habit.description or "",
+            performance_history=performance_history,
+            language="en"  # TODO: Get from user preferences
+        )
+
+        if not response.success:
+            raise HTTPException(status_code=500, detail=response.error)
+
+        return {
+            "success": True,
+            "suggestions": response.data,
+            "metadata": response.metadata
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate suggestions: {str(e)}")
 
 # --- Motivation/Ability Endpoints ---
 

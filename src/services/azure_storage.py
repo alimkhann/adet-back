@@ -117,3 +117,4 @@ class AzureStorageService:
 # Global instance
 azure_storage = AzureStorageService()
 
+

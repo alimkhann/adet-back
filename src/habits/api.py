@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from datetime import date, datetime, timedelta
 from pytz import UTC
+import logging
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
@@ -10,6 +11,7 @@ from src.auth.models import User as UserModel
 from src.ai import get_ai_orchestrator, TaskGenerationContext, AIAgentResponse
 from . import crud, schemas
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 @router.get("/", response_model=List[schemas.Habit])

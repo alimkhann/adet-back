@@ -65,10 +65,13 @@ class GeminiAIClient:
         """Generate structured response using Pydantic schema"""
         try:
             schema_instructions = f"""
-            Respond with a valid JSON object that matches this schema:
+            IMPORTANT: Respond with ONLY a valid JSON object that matches this schema. Do not include any schema descriptions, explanations, or markdown formatting.
+
+            Required JSON schema:
             {response_schema.model_json_schema()}
 
-            Keep responses concise. Ensure the response is valid JSON and matches the schema exactly.
+            Return ONLY the JSON object, nothing else. Example format:
+            {{"field1": "value1", "field2": 123}}
             """
             full_prompt = f"{prompt}\n\n{schema_instructions}"
             if system_prompt:
@@ -98,6 +101,34 @@ class GeminiAIClient:
                 if text.endswith('```'):
                     text = text[:-3]  # Remove ```
                 text = text.strip()
+
+            # Handle case where AI returns schema description + JSON
+            # Look for the actual JSON response part
+            if '```json' in text and '```' in text:
+                # Extract JSON from markdown code blocks
+                start_idx = text.find('```json') + 7
+                end_idx = text.find('```', start_idx)
+                if end_idx > start_idx:
+                    text = text[start_idx:end_idx].strip()
+            elif text.count('{') > 1:
+                # Multiple JSON objects - find the last complete one
+                json_parts = []
+                brace_count = 0
+                current_json = ""
+
+                for char in text:
+                    current_json += char
+                    if char == '{':
+                        brace_count += 1
+                    elif char == '}':
+                        brace_count -= 1
+                        if brace_count == 0 and current_json.strip().startswith('{'):
+                            json_parts.append(current_json.strip())
+                            current_json = ""
+
+                # Use the last valid JSON object
+                if json_parts:
+                    text = json_parts[-1]
 
             # Handle truncated JSON by trying to fix common issues
             if not text.strip().endswith('}'):

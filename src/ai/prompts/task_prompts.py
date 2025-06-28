@@ -72,9 +72,21 @@ Generate a task with these components:
 5. Celebration Message: Brief encouraging message (friendly, motivational tone)
 6. Easier Alternative: Simpler version if this feels too hard
 7. Harder Alternative: More challenging version if this feels too easy
-8. Proof Requirements: What specific proof is needed
+8. Proof Requirements: Specific instructions on how to prove completion based on {proof_style} proof style
 
-Keep the task description simple and direct. No complex "After I..." anchoring needed - just tell them what to do clearly.
+For Proof Requirements, be very specific:
+- Photo: "Take a photo showing [specific visual evidence]"
+- Video: "Record a video demonstrating [specific action/result]"
+- Audio: "Record audio of [specific sound/narration]"
+- Text: "Write a description including [specific details to mention]"
+
+Examples of good proof requirements:
+- Photo: "Take a photo of your workout setup with you in exercise position"
+- Video: "Record a 30-second video showing you performing the exercise"
+- Audio: "Record yourself reading aloud for 1 minute"
+- Text: "Write 3-5 sentences describing what you learned or accomplished"
+
+Keep the task description simple and direct. No complex "After I..." anchoring needed - just tell them what to do clearly and how to prove they did it.
 
 Example formats:
 - "Practice leetcode for 10 minutes"

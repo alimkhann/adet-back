@@ -29,18 +29,18 @@ class Habit(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
 
-    # Relationships
+    # Relationships with cascade delete
     user = relationship("User", back_populates="habits")
-    motivation_entries = relationship("MotivationEntry", back_populates="habit")
-    ability_entries = relationship("AbilityEntry", back_populates="habit")
-    task_entries = relationship("TaskEntry", back_populates="habit")
+    motivation_entries = relationship("MotivationEntry", back_populates="habit", cascade="all, delete-orphan")
+    ability_entries = relationship("AbilityEntry", back_populates="habit", cascade="all, delete-orphan")
+    task_entries = relationship("TaskEntry", back_populates="habit", cascade="all, delete-orphan")
 
 class MotivationEntry(Base):
     __tablename__ = "motivation_entries"
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, nullable=False)  # clerk_id
-    habit_id = Column(Integer, ForeignKey("habits.id"), nullable=False)
+    habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     level = Column(String, nullable=False)  # MotivationLevel enum
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -53,7 +53,7 @@ class AbilityEntry(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(String, nullable=False)  # clerk_id
-    habit_id = Column(Integer, ForeignKey("habits.id"), nullable=False)
+    habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=False)
     date = Column(Date, nullable=False)
     level = Column(String, nullable=False)  # AbilityLevel enum
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -80,7 +80,7 @@ class TaskEntry(Base):
     __tablename__ = "task_entries"
 
     id = Column(Integer, primary_key=True, index=True)
-    habit_id = Column(Integer, ForeignKey("habits.id"), nullable=False)
+    habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
 
     # Task details

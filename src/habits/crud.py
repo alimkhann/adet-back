@@ -49,10 +49,15 @@ async def update_habit(db: AsyncSession, habit_id: int, habit_data: schemas.Habi
     return db_habit
 
 async def delete_habit(db: AsyncSession, habit_id: int, user_id: int):
+    print(f"Attempting to delete habit {habit_id} for user {user_id}")
     db_habit = await get_habit(db=db, habit_id=habit_id, user_id=user_id)
     if db_habit:
+        print(f"Found habit to delete: {db_habit.name} (ID: {db_habit.id})")
         await db.delete(db_habit)
         await db.commit()
+        print(f"Successfully deleted habit {habit_id}")
+    else:
+        print(f"Habit {habit_id} not found for user {user_id}")
     return db_habit
 
 # --- Task Completion CRUD ---

@@ -9,16 +9,15 @@ class DifficultyResponse(BaseModel):
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in the difficulty assessment")
 
 class GeneratedTask(BaseModel):
-    """Response from Task Generator Agent"""
-    task_description: str = Field(..., description="Specific, actionable task description")
-    difficulty_level: float = Field(..., ge=0.5, le=3.0, description="Final difficulty level")
-    estimated_duration: int = Field(..., ge=1, le=60, description="Estimated time in minutes")
-    success_criteria: str = Field(..., description="Clear criteria for task completion")
+    """Generated task structure"""
+    task_description: str = Field(..., description="The generated task description")
+    difficulty_level: float = Field(..., description="Final difficulty level (0.5-3.0)")
+    estimated_duration: int = Field(..., description="Estimated time in minutes")
+    success_criteria: str = Field(..., description="How to know the task is complete")
     celebration_message: str = Field(..., description="Message to celebrate completion")
     easier_alternative: Optional[str] = Field(None, description="Alternative if task feels too hard")
     harder_alternative: Optional[str] = Field(None, description="Alternative if task feels too easy")
-    anchor_suggestion: Optional[str] = Field(None, description="Suggested anchor habit (After I...)")
-    proof_requirements: str = Field(..., description="What proof is required for this task")
+    proof_requirements: str = Field(..., description="What proof is required")
 
 class MotivationalResponse(BaseModel):
     """Response from Motivational Coach Agent"""

@@ -13,12 +13,13 @@ class Settings(BaseSettings):
 
     # AI Configuration
     openai_api_key: str | None = None
-    google_api_key: str | None = None
+    gemini_api_key: str | None = None
 
     # Vertex AI Configuration
-    google_cloud_project: str | None = None
-    google_cloud_location: str = "us-central1"
-    google_application_credentials: str | None = None
+    # google_cloud_project: str | None = None
+    # google_cloud_location: str = "us-central1"
+    # google_application_credentials: str | None = None
+    # google_genai_model: str | None = None
 
     # Azure Storage Configuration
     azure_storage_connection_string: str | None = None

@@ -91,7 +91,6 @@ class TaskEntry(Base):
     celebration_message = Column(Text, nullable=False)
     easier_alternative = Column(Text)
     harder_alternative = Column(Text)
-    anchor_suggestion = Column(Text)
     proof_requirements = Column(Text, nullable=False)
 
     # Task state

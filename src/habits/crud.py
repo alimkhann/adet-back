@@ -76,7 +76,6 @@ async def create_task_entry(
         celebration_message=task_data["celebration_message"],
         easier_alternative=task_data.get("easier_alternative"),
         harder_alternative=task_data.get("harder_alternative"),
-        anchor_suggestion=task_data.get("anchor_suggestion"),
         proof_requirements=task_data["proof_requirements"],
         assigned_date=assigned_date,
         due_date=due_date,

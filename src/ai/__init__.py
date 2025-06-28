@@ -4,7 +4,7 @@ BJ Fogg's Tiny Habits methodology implementation with Vertex AI
 """
 
 from .orchestrator import get_ai_orchestrator, AIOrchestrator
-from .vertex_client import get_vertex_client, VertexAIClient
+from .gemini_client import get_gemini_client, GeminiAIClient
 from .schemas import (
     AIAgentResponse,
     TaskGenerationContext,
@@ -22,9 +22,9 @@ __all__ = [
     "get_ai_orchestrator",
     "AIOrchestrator",
 
-    # Vertex AI client
-    "get_vertex_client",
-    "VertexAIClient",
+    # Gemini AI client
+    "get_gemini_client",
+    "GeminiAIClient",
 
     # Schemas
     "AIAgentResponse",

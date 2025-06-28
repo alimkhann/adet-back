@@ -3,7 +3,7 @@ import asyncio
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from .vertex_client import get_vertex_client
+from .gemini_client import get_gemini_client
 from .schemas import (
     AIAgentResponse,
     TaskGenerationContext,
@@ -24,7 +24,7 @@ class AIOrchestrator:
     def __init__(self):
         self.difficulty_agent = DifficultyCalibratorAgent()
         self.task_agent = TaskGeneratorAgent()
-        self.vertex_client = get_vertex_client()
+        self.gemini_client = get_gemini_client()
 
     async def generate_personalized_task(
         self,
@@ -254,10 +254,10 @@ class AIOrchestrator:
             Format as a list of specific suggestions.
             """
 
-            suggestions_response = await self.vertex_client.generate_text(
+            suggestions_response = await self.gemini_client.generate_text(
                 prompt=prompt,
                 temperature=0.7,
-                max_tokens=500
+                max_tokens=3000
             )
 
             return AIAgentResponse(

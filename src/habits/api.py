@@ -2,6 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from datetime import date, datetime, timedelta
+from pytz import UTC
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
@@ -130,22 +131,34 @@ async def generate_and_create_task(
             recent_performance=recent_performance
         )
 
+        # If full AI generation fails, try quick fallback
         if not response.success:
-            raise HTTPException(status_code=500, detail=response.error)
+            logger.warning(f"Full AI generation failed: {response.error}. Trying quick fallback...")
+            response = await ai_orchestrator.generate_quick_task(
+                habit_name=habit.name,
+                base_difficulty=habit.difficulty,
+                proof_style=habit.proof_style,
+                language="en"
+            )
 
-        # Create task in database
-        assigned_date = date.today()
-        due_date = datetime.utcnow() + timedelta(hours=4)  # 4-hour window
+        if not response.success:
+            raise HTTPException(status_code=500, detail=f"Failed to generate task: {response.error}")
 
+        # Create task entry in database
         task_entry = await crud.create_task_entry(
             db=db,
             habit_id=habit_id,
             user_id=current_user.id,
             task_data=response.data,
-            assigned_date=assigned_date,
-            due_date=due_date
+            assigned_date=date.today(),
+            due_date=datetime.utcnow() + timedelta(hours=4)
         )
 
+        # Commit and refresh the entry
+        await db.commit()
+        await db.refresh(task_entry)
+
+        # Return task creation response format
         return {
             "success": True,
             "task": task_entry,

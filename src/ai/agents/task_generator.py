@@ -2,7 +2,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from datetime import datetime
 
-from ..vertex_client import get_vertex_client
+from ..gemini_client import get_gemini_client
 from ..schemas import GeneratedTask, AIAgentResponse, TaskGenerationContext
 from ..prompts.task_prompts import get_task_generation_prompt, TASK_TEMPLATES
 
@@ -15,7 +15,7 @@ class TaskGeneratorAgent:
     """
 
     def __init__(self):
-        self.vertex_client = get_vertex_client()
+        self.gemini_client = get_gemini_client()
         self.language = "en"  # Default language
 
     async def generate_task(
@@ -49,7 +49,7 @@ class TaskGeneratorAgent:
             system_prompt = TASK_TEMPLATES.get(context.user_language, TASK_TEMPLATES["en"])["system"]
 
             # Generate structured response
-            response = await self.vertex_client.generate_structured_response(
+            response = await self.gemini_client.generate_structured_response(
                 prompt=prompt,
                 response_schema=GeneratedTask,
                 temperature=0.7,  # Higher temperature for creativity
@@ -68,7 +68,6 @@ class TaskGeneratorAgent:
                     "celebration_message": response.celebration_message,
                     "easier_alternative": response.easier_alternative,
                     "harder_alternative": response.harder_alternative,
-                    "anchor_suggestion": response.anchor_suggestion,
                     "proof_requirements": response.proof_requirements
                 },
                 metadata={
@@ -135,7 +134,6 @@ class TaskGeneratorAgent:
                     "celebration_message": celebration,
                     "easier_alternative": None,
                     "harder_alternative": None,
-                    "anchor_suggestion": "After I [choose your anchor]",
                     "proof_requirements": f"Provide {proof_style} proof of completion"
                 },
                 metadata={
@@ -178,10 +176,10 @@ class TaskGeneratorAgent:
             Make anchors specific, actionable, and relevant to the habit.
             """
 
-            response = await self.vertex_client.generate_text(
+            response = await self.gemini_client.generate_text(
                 prompt=prompt,
                 temperature=0.7,
-                max_tokens=300
+                max_tokens=3000
             )
 
             return AIAgentResponse(

@@ -4,23 +4,16 @@ Based on B=MAT formula: Behavior = Motivation × Ability × Trigger
 """
 
 # System prompt for Difficulty Agent
-DIFFICULTY_SYSTEM_PROMPT = """You are Dr. BJ Fogg's Tiny Habits difficulty calibrator. Your mission is to find the sweet spot where the person feels successful but slightly challenged.
-
-Core Principles:
-1. "Start tiny, be consistent, celebrate success"
-2. B=MAT: Behavior = Motivation × Ability × Trigger
-3. Make it so small it's almost silly not to do
-4. Success breeds success - prioritize completion over challenge
-5. Adapt difficulty based on current state, not ideal state
+DIFFICULTY_SYSTEM_PROMPT = """You are a task difficulty calibrator. Find the right challenge level for habit success.
 
 Difficulty Scale (0.5-3.0):
-- 0.5-1.0: Ultra-tiny (guaranteed success, builds momentum)
-- 1.0-1.5: Tiny (BJ Fogg sweet spot, 30 seconds to 2 minutes)
-- 1.5-2.0: Small (slightly challenging, 2-5 minutes)
-- 2.0-2.5: Medium (moderate challenge, use sparingly)
+- 0.5-1.0: Ultra-tiny (guaranteed success)
+- 1.0-1.5: Tiny (sweet spot, 30 seconds to 2 minutes)
+- 1.5-2.0: Small (2-5 minutes)
+- 2.0-2.5: Medium (moderate challenge)
 - 2.5-3.0: Hard (only when motivation and ability are high)
 
-Remember: It's better to start too small than too big. You can always increase difficulty later."""
+Rule: When in doubt, go smaller. Success > challenge."""
 
 # Main difficulty calibration prompt
 def get_difficulty_prompt(
@@ -32,7 +25,7 @@ def get_difficulty_prompt(
     language: str = "en"
 ) -> str:
     """
-    Generate difficulty calibration prompt in BJ Fogg style
+    Generate difficulty calibration prompt in simplified style
     """
 
     # Map levels to numerical values for calculation
@@ -48,42 +41,23 @@ def get_difficulty_prompt(
     bmat_score = motivation_score * ability_score * base_score
 
     # Analyze recent performance
-    performance_analysis = ""
+    performance_note = ""
     if recent_performance:
         success_rate = sum(1 for p in recent_performance if p.get("completed", False)) / len(recent_performance)
         if success_rate < 0.5:
-            performance_analysis = f"Recent success rate is low ({success_rate:.1%}), suggesting we need to reduce difficulty."
+            performance_note = "Low success rate - reduce difficulty"
         elif success_rate > 0.8:
-            performance_analysis = f"Recent success rate is high ({success_rate:.1%}), we can slightly increase difficulty."
-        else:
-            performance_analysis = f"Recent success rate is moderate ({success_rate:.1%}), maintain current level."
+            performance_note = "High success rate - can increase slightly"
 
     prompt = f"""
 Habit: {habit_name}
+- Motivation: {motivation_level} ({motivation_score})
+- Ability: {ability_level} ({ability_score})
+- Base: {base_difficulty} ({base_score})
+- Score: {bmat_score:.2f}
+{performance_note}
 
-Current State Analysis:
-- Base Difficulty: {base_difficulty} (score: {base_score})
-- Motivation Level: {motivation_level} (score: {motivation_score})
-- Ability Level: {ability_level} (score: {ability_score})
-- B=MAT Score: {bmat_score:.2f}
-
-{performance_analysis}
-
-Your Task:
-Using BJ Fogg's Tiny Habits methodology, calculate the optimal difficulty level (0.5-3.0) for today's task.
-
-Consider:
-1. Current motivation and ability levels
-2. Recent performance patterns
-3. The principle of "start tiny"
-4. Building momentum through success
-
-Provide:
-1. Recommended difficulty level (0.5-3.0)
-2. Clear reasoning based on BJ Fogg principles
-3. Confidence level in your assessment
-
-Remember: When in doubt, go smaller. Success is more important than challenge.
+Calculate optimal difficulty (0.5-3.0). Keep it simple and achievable.
 """
 
     return prompt

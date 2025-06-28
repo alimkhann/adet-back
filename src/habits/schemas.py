@@ -40,7 +40,6 @@ class TaskEntryBase(BaseModel):
     celebration_message: str
     easier_alternative: Optional[str] = None
     harder_alternative: Optional[str] = None
-    anchor_suggestion: Optional[str] = None
     proof_requirements: str
 
 class TaskEntryCreate(TaskEntryBase):
@@ -61,6 +60,8 @@ class TaskEntryRead(TaskEntryBase):
     proof_validation_result: Optional[bool] = None
     proof_validation_confidence: Optional[float] = None
     proof_feedback: Optional[str] = None
+    ai_generation_metadata: Optional[str] = None
+    calibration_metadata: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
 
@@ -106,7 +107,6 @@ class GeneratedTaskResponse(BaseModel):
     celebration_message: str = Field(..., description="Message to celebrate completion")
     easier_alternative: Optional[str] = Field(None, description="Alternative if task feels too hard")
     harder_alternative: Optional[str] = Field(None, description="Alternative if task feels too easy")
-    anchor_suggestion: Optional[str] = Field(None, description="Suggested anchor habit")
     proof_requirements: str = Field(..., description="What proof is required")
     calibration_metadata: Optional[dict] = Field(None, description="Difficulty calibration metadata")
 

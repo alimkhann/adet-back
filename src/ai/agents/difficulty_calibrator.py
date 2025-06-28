@@ -2,7 +2,7 @@ import logging
 from typing import List, Dict, Any
 from datetime import datetime
 
-from ..vertex_client import get_vertex_client
+from ..gemini_client import get_gemini_client
 from ..schemas import DifficultyResponse, AIAgentResponse
 from ..prompts.difficulty_prompts import get_difficulty_prompt, DIFFICULTY_PROMPTS
 
@@ -15,7 +15,7 @@ class DifficultyCalibratorAgent:
     """
 
     def __init__(self):
-        self.vertex_client = get_vertex_client()
+        self.gemini_client = get_gemini_client()
         self.language = "en"  # Default language
 
     async def calibrate_difficulty(
@@ -58,7 +58,7 @@ class DifficultyCalibratorAgent:
             system_prompt = DIFFICULTY_PROMPTS.get(language, DIFFICULTY_PROMPTS["en"])["system"]
 
             # Generate structured response
-            response = await self.vertex_client.generate_structured_response(
+            response = await self.gemini_client.generate_structured_response(
                 prompt=prompt,
                 response_schema=DifficultyResponse,
                 temperature=0.3,  # Low temperature for consistent calibration

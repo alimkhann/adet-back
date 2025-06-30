@@ -18,6 +18,7 @@ class UserBasic(BaseModel):
 class MessageCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
     message_type: str = Field(default="text")
+    replied_to_message_id: Optional[int] = None
 
 
 class MessageResponse(BaseModel):
@@ -31,6 +32,8 @@ class MessageResponse(BaseModel):
     delivered_at: Optional[datetime] = None
     read_at: Optional[datetime] = None
     sender: UserBasic
+    replied_to_message_id: Optional[int] = None
+    replied_to_message: Optional["MessageResponse"] = None
 
     class Config:
         from_attributes = True
@@ -121,3 +124,11 @@ class WebSocketMessage(BaseModel):
 class ErrorResponse(BaseModel):
     error: str
     detail: Optional[str] = None
+
+
+class MessageUpdate(BaseModel):
+    content: str = Field(..., min_length=1, max_length=1000)
+
+
+class MessageDeleteRequest(BaseModel):
+    delete_for_everyone: bool = False

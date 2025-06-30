@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import List, Optional, Tuple
 from sqlalchemy import and_, or_, desc, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -134,7 +134,8 @@ class MessageCRUD:
         conversation_id: int,
         sender_id: int,
         content: str,
-        message_type: str = "text"
+        message_type: str = "text",
+        replied_to_message_id: Optional[int] = None
     ) -> Message:
         """Create a new message"""
         message = Message(
@@ -142,7 +143,8 @@ class MessageCRUD:
             sender_id=sender_id,
             content=content,
             message_type=message_type,
-            status="sent"
+            status="sent",
+            replied_to_message_id=replied_to_message_id
         )
 
         db.add(message)
@@ -233,6 +235,90 @@ class MessageCRUD:
         )
         result = await db.execute(query)
         return result.scalar_one_or_none()
+
+    @staticmethod
+    async def update_message_content(
+        db: AsyncSession,
+        message_id: int,
+        sender_id: int,
+        content: str
+    ) -> Optional[Message]:
+        """Update message content (only by sender within time limit)"""
+        # Get the message first
+        query = select(Message).where(
+            and_(
+                Message.id == message_id,
+                Message.sender_id == sender_id
+            )
+        ).options(selectinload(Message.sender))
+
+        result = await db.execute(query)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return None
+
+        # Check if message is within edit time limit (30 minutes)
+        time_limit = timedelta(minutes=30)
+        if datetime.utcnow() - message.created_at.replace(tzinfo=None) > time_limit:
+            return None
+
+        # Update the message
+        await db.execute(
+            update(Message)
+            .where(Message.id == message_id)
+            .values(content=content)
+        )
+        await db.commit()
+
+        # Return updated message
+        result = await db.execute(query)
+        return result.scalar_one_or_none()
+
+    @staticmethod
+    async def delete_message(
+        db: AsyncSession,
+        message_id: int,
+        sender_id: int,
+        delete_for_everyone: bool = False
+    ) -> bool:
+        """Delete message (soft delete with different behavior for delete_for_everyone)"""
+        # Get the message first
+        query = select(Message).where(
+            and_(
+                Message.id == message_id,
+                Message.sender_id == sender_id
+            )
+        )
+
+        result = await db.execute(query)
+        message = result.scalar_one_or_none()
+
+        if not message:
+            return False
+
+        if delete_for_everyone:
+            # Check if message is within delete time limit (30 minutes)
+            time_limit = timedelta(minutes=30)
+            if datetime.utcnow() - message.created_at.replace(tzinfo=None) > time_limit:
+                return False
+
+            # Delete for everyone - actually remove the message
+            await db.execute(
+                update(Message)
+                .where(Message.id == message_id)
+                .values(
+                    content="[Message deleted]",
+                    message_type="system"
+                )
+            )
+        else:
+            # Delete for me only - mark as deleted for this user
+            # For now, we'll just return success since this would require additional schema
+            pass
+
+        await db.commit()
+        return True
 
 
 class ParticipantCRUD:

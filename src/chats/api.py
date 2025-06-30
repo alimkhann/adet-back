@@ -9,7 +9,7 @@ from ..auth.dependencies import get_current_user
 from ..auth.models import User as UserModel
 from .schemas import (
     ConversationResponse, ConversationListResponse, ConversationCreate,
-    MessageResponse, MessageListResponse, MessageCreate, ErrorResponse
+    MessageResponse, MessageListResponse, MessageCreate, ErrorResponse, MessageUpdate, MessageDeleteRequest
 )
 from .service import ChatService
 from .websocket_manager import chat_websocket_manager
@@ -126,7 +126,7 @@ async def send_message(
 @router.post("/conversations/{conversation_id}/read")
 async def mark_messages_as_read(
     conversation_id: int,
-    last_message_id: int,
+    last_message_id: int = Query(..., description="ID of the last message to mark as read"),
     current_user: UserModel = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_db)
 ):
@@ -141,6 +141,48 @@ async def mark_messages_as_read(
     except Exception as e:
         logger.error(f"Error marking messages as read in conversation {conversation_id}: {e}")
         raise HTTPException(status_code=500, detail="Failed to mark messages as read")
+
+
+@router.put("/conversations/{conversation_id}/messages/{message_id}", response_model=MessageResponse)
+async def edit_message(
+    conversation_id: int,
+    message_id: int,
+    message_data: MessageUpdate,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Edit a message (only by sender within 30 minutes)"""
+    try:
+        message = await ChatService.edit_message(
+            db, conversation_id, message_id, current_user.id, message_data.content
+        )
+        return message
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error editing message {message_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to edit message")
+
+
+@router.delete("/conversations/{conversation_id}/messages/{message_id}")
+async def delete_message(
+    conversation_id: int,
+    message_id: int,
+    delete_data: MessageDeleteRequest = MessageDeleteRequest(),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Delete a message"""
+    try:
+        result = await ChatService.delete_message(
+            db, conversation_id, message_id, current_user.id, delete_data.delete_for_everyone
+        )
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error deleting message {message_id}: {e}")
+        raise HTTPException(status_code=500, detail="Failed to delete message")
 
 
 # WebSocket Endpoint

@@ -46,6 +46,9 @@ class Message(Base):
     content = Column(Text, nullable=False)
     message_type = Column(String, nullable=False, default="text")  # text, system
 
+    # Reply support
+    replied_to_message_id = Column(Integer, ForeignKey("messages.id"), nullable=True)
+
     # Message status for real-time features
     status = Column(String, nullable=False, default="sent")  # sent, delivered, read
 
@@ -57,12 +60,14 @@ class Message(Base):
     # Relationships
     conversation = relationship("Conversation", back_populates="messages")
     sender = relationship("User", foreign_keys=[sender_id])
+    replied_to_message = relationship("Message", remote_side=[id], foreign_keys=[replied_to_message_id])
 
     # Constraints and indexes
     __table_args__ = (
         Index('idx_message_conversation_created', 'conversation_id', 'created_at'),
         Index('idx_message_sender', 'sender_id'),
         Index('idx_message_status', 'status'),
+        Index('idx_message_replied_to', 'replied_to_message_id'),
     )
 
 

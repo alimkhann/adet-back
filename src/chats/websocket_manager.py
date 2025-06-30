@@ -306,6 +306,64 @@ class ChatWebSocketManager:
             if is_typing
         }
 
+    async def broadcast_message_edit(
+        self,
+        conversation_id: int,
+        message_data: dict,
+        exclude_user: Optional[int] = None
+    ):
+        """Broadcast message edit to all participants in conversation"""
+        if conversation_id not in self.conversation_connections:
+            return
+
+        event = {
+            "type": "message_edited",
+            "conversation_id": conversation_id,
+            "message": message_data
+        }
+
+        connections = self.conversation_connections[conversation_id].copy()
+        for websocket, user_id in connections:
+            if exclude_user and user_id == exclude_user:
+                continue
+
+            try:
+                await websocket.send_text(json.dumps(event))
+            except Exception as e:
+                logger.error(f"Error sending message edit to user {user_id}: {e}")
+                # Remove broken connection
+                self.conversation_connections[conversation_id].discard((websocket, user_id))
+
+    async def broadcast_message_delete(
+        self,
+        conversation_id: int,
+        message_id: int,
+        delete_for_everyone: bool,
+        exclude_user: Optional[int] = None
+    ):
+        """Broadcast message deletion to all participants in conversation"""
+        if conversation_id not in self.conversation_connections:
+            return
+
+        event = {
+            "type": "message_deleted",
+            "conversation_id": conversation_id,
+            "message_id": message_id,
+            "delete_for_everyone": delete_for_everyone
+        }
+
+        connections = self.conversation_connections[conversation_id].copy()
+        for websocket, user_id in connections:
+            if exclude_user and user_id == exclude_user:
+                continue
+
+            try:
+                await websocket.send_text(json.dumps(event))
+            except Exception as e:
+                logger.error(f"Error sending message deletion to user {user_id}: {e}")
+                # Remove broken connection
+                self.conversation_connections[conversation_id].discard((websocket, user_id))
+
 
 # Global WebSocket manager instance
 chat_websocket_manager = ChatWebSocketManager()

@@ -56,7 +56,9 @@ class ChatService:
                         username=latest_msg.sender.username,
                         name=latest_msg.sender.name,
                         profile_image_url=latest_msg.sender.profile_image_url
-                    )
+                    ),
+                    replied_to_message_id=getattr(latest_msg, 'replied_to_message_id', None),
+                    replied_to_message=None
                 )
 
             # Get unread count and presence info
@@ -199,7 +201,9 @@ class ChatService:
                     username=msg.sender.username,
                     name=msg.sender.name,
                     profile_image_url=msg.sender.profile_image_url
-                )
+                ),
+                replied_to_message_id=msg.replied_to_message_id,
+                replied_to_message=None  # For now, we'll add this later if needed
             )
             message_responses.append(message_response)
 
@@ -209,12 +213,9 @@ class ChatService:
 
     @staticmethod
     async def send_message(
-        db: AsyncSession,
-        conversation_id: int,
-        user_id: int,
-        message_create: MessageCreate
+        db: AsyncSession, conversation_id: int, user_id: int, message_create: MessageCreate
     ) -> MessageResponse:
-        """Send a new message"""
+        """Send a message in a conversation"""
         # Verify user is participant in conversation
         participant = await ParticipantCRUD.get_participant(
             db, conversation_id, user_id
@@ -228,7 +229,12 @@ class ChatService:
 
         # Create the message
         message = await MessageCRUD.create_message(
-            db, conversation_id, user_id, message_create.content, message_create.message_type
+            db,
+            conversation_id=conversation_id,
+            sender_id=user_id,
+            content=message_create.content,
+            message_type=message_create.message_type,
+            replied_to_message_id=message_create.replied_to_message_id
         )
 
         # Convert to response format
@@ -247,7 +253,9 @@ class ChatService:
                 username=message.sender.username,
                 name=message.sender.name,
                 profile_image_url=message.sender.profile_image_url
-            )
+            ),
+            replied_to_message_id=message.replied_to_message_id,
+            replied_to_message=None  # For now, we'll add this later if needed
         )
 
         # Broadcast message via WebSocket
@@ -324,12 +332,15 @@ class ChatService:
                 detail="Not a participant in this conversation"
             )
 
-        # Get conversation
-        conv = await ConversationCRUD.get_conversation_between_users(
-            db,
-            participant.conversation.participant_1_id,
-            participant.conversation.participant_2_id
+        # Get conversation directly by ID with proper async loading
+        from sqlalchemy import select
+        from sqlalchemy.orm import selectinload
+        query = select(Conversation).where(Conversation.id == conversation_id).options(
+            selectinload(Conversation.participant_1),
+            selectinload(Conversation.participant_2)
         )
+        result = await db.execute(query)
+        conv = result.scalar_one_or_none()
 
         if not conv:
             raise HTTPException(
@@ -381,3 +392,105 @@ class ChatService:
             is_other_online=is_other_online,
             other_last_seen=other_participant_record.last_seen_at if other_participant_record else None
         )
+
+    @staticmethod
+    async def edit_message(
+        db: AsyncSession,
+        conversation_id: int,
+        message_id: int,
+        user_id: int,
+        content: str
+    ) -> MessageResponse:
+        """Edit a message (only by sender within time limit)"""
+        # Verify user is participant in conversation
+        participant = await ParticipantCRUD.get_participant(
+            db, conversation_id, user_id
+        )
+
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a participant in this conversation"
+            )
+
+        # Update the message
+        updated_message = await MessageCRUD.update_message_content(
+            db, message_id, user_id, content
+        )
+
+        if not updated_message:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Message not found or cannot be edited"
+            )
+
+        # Convert to response format
+        message_response = MessageResponse(
+            id=updated_message.id,
+            conversation_id=updated_message.conversation_id,
+            sender_id=updated_message.sender_id,
+            content=updated_message.content,
+            message_type=updated_message.message_type,
+            status=updated_message.status,
+            created_at=updated_message.created_at,
+            delivered_at=updated_message.delivered_at,
+            read_at=updated_message.read_at,
+            sender=UserBasic(
+                id=updated_message.sender.id,
+                username=updated_message.sender.username,
+                name=updated_message.sender.name,
+                profile_image_url=updated_message.sender.profile_image_url
+            ),
+            replied_to_message_id=updated_message.replied_to_message_id,
+            replied_to_message=None
+        )
+
+        # Broadcast updated message via WebSocket
+        await chat_websocket_manager.broadcast_message_edit(
+            conversation_id,
+            message_response.model_dump(),
+            exclude_user=user_id
+        )
+
+        return message_response
+
+    @staticmethod
+    async def delete_message(
+        db: AsyncSession,
+        conversation_id: int,
+        message_id: int,
+        user_id: int,
+        delete_for_everyone: bool = False
+    ):
+        """Delete a message"""
+        # Verify user is participant in conversation
+        participant = await ParticipantCRUD.get_participant(
+            db, conversation_id, user_id
+        )
+
+        if not participant:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a participant in this conversation"
+            )
+
+        # Delete the message
+        success = await MessageCRUD.delete_message(
+            db, message_id, user_id, delete_for_everyone
+        )
+
+        if not success:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Message not found or cannot be deleted"
+            )
+
+        # Broadcast deletion via WebSocket
+        await chat_websocket_manager.broadcast_message_delete(
+            conversation_id,
+            message_id,
+            delete_for_everyone,
+            exclude_user=user_id
+        )
+
+        return {"status": "success", "message": "Message deleted"}

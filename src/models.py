@@ -2,6 +2,18 @@ from sqlalchemy.sql import func
 
 from .database import Base
 
+# Import all models to register them with SQLAlchemy Base
+from .auth.models import User
+from .onboarding.models import OnboardingAnswer
+from .habits.models import (
+    Habit,
+    MotivationEntry,
+    AbilityEntry,
+    TaskEntry,
+    TaskValidation
+)
+
+# All models are now imported and registered with Base.metadata
 
 # User model moved to auth/models.py
 # class User(Base):

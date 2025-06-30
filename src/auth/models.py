@@ -10,10 +10,7 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     clerk_id = Column(String, unique=True, index=True, nullable=False)
     email = Column(String, nullable=False, index=True)
-    username = Column(String, unique=True, nullable=False)  # Now unique and required
-    name = Column(String, nullable=True)  # Display name, not unique
-    bio = Column(String, nullable=True)   # Optional bio
-    profile_image_url = Column(String, nullable=True)  # URL to profile image
+    username = Column(String, nullable=True)  # Made nullable since we'll get it from Clerk
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
@@ -25,5 +22,9 @@ class User(Base):
         uselist=False,
         passive_deletes=True
     )
+
+    # Relationship with habits
     habits = relationship("Habit", back_populates="user", cascade="all, delete-orphan")
+
+    # Relationship with task entries
     task_entries = relationship("TaskEntry", back_populates="user", cascade="all, delete-orphan")

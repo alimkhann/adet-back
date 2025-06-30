@@ -68,6 +68,7 @@ class TaskStatus(str, Enum):
     completed = "completed"
     failed = "failed"
     missed = "missed"
+    pending_review = "pending_review"
 
 class ProofType(str, Enum):
     photo = "photo"
@@ -141,3 +142,4 @@ class TaskValidation(Base):
 
     # Relationships
     task_entry = relationship("TaskEntry")
+

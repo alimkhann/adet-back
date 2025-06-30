@@ -61,3 +61,4 @@ class AIAgentResponse(BaseModel):
     data: Optional[dict] = Field(None, description="Response data")
     error: Optional[str] = Field(None, description="Error message if failed")
     metadata: dict = Field(default_factory=dict, description="Additional metadata")
+

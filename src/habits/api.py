@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import List
 from datetime import date, datetime, timedelta
@@ -173,40 +173,121 @@ async def generate_and_create_task(
 @router.post("/tasks/{task_id}/submit-proof")
 async def submit_task_proof(
     task_id: int,
-    proof_data: schemas.TaskProofSubmit,
+    proof_type: str = Form(...),
+    proof_content: str = Form(...),
+    file: UploadFile = File(None),
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Submit proof for a task"""
+    """Submit proof for a task with AI validation"""
     try:
-        # Submit proof
-        task = await crud.submit_task_proof(
+        # Get the task
+        task = await crud.get_task_by_id(db=db, task_id=task_id, user_id=current_user.id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        if task.status != "pending":
+            raise HTTPException(status_code=400, detail="Task is not pending")
+
+        # Get the habit for context
+        habit = await crud.get_habit(db=db, habit_id=task.habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        file_url = None
+        file_data = None
+
+        # Handle file upload if provided
+        if file:
+            # Import file upload service
+            from ..services.file_upload import file_upload_service
+
+            # Read file data
+            file_data = await file.read()
+
+            # Upload the file
+            success, file_url, error = await file_upload_service.upload_proof_file(
+                file_data=file_data,
+                filename=file.filename or "proof_file",
+                content_type=file.content_type or "application/octet-stream",
+                user_id=current_user.clerk_id,
+                task_id=task_id
+            )
+
+            if not success:
+                raise HTTPException(status_code=400, detail=f"File upload failed: {error}")
+
+        # Validate the proof using AI
+        validation_result = None
+        try:
+            from ..ai.agents.proof_validator import validate_proof
+
+            validation_result = await validate_proof(
+                task_description=task.task_description,
+                proof_requirements=task.proof_requirements,
+                proof_type=proof_type,
+                proof_content=proof_content,
+                user_name=current_user.name or "User",
+                habit_name=habit.name,
+                proof_file_data=file_data
+            )
+        except Exception as e:
+            logger.error(f"AI validation error: {e}")
+            # Continue without AI validation
+            validation_result = None
+
+        # Submit proof using existing CRUD function
+        await crud.submit_task_proof(
             db=db,
             task_id=task_id,
             user_id=current_user.id,
-            proof_type=proof_data.proof_type,
-            proof_content=proof_data.proof_content
+            proof_type=proof_type,
+            proof_content=file_url or proof_content
         )
 
-        # TODO: Add AI validation here in Phase 3
-        # For now, mark as validated
-        await crud.validate_task_proof(
-            db=db,
-            task_id=task_id,
-            validation_result=True,
-            confidence=0.8,
-            feedback="Proof submitted successfully"
-        )
+        # Validate with AI results
+        if validation_result:
+            is_valid = validation_result.is_valid and validation_result.confidence >= 0.7
+            await crud.validate_task_proof(
+                db=db,
+                task_id=task_id,
+                validation_result=is_valid,
+                confidence=validation_result.confidence,
+                feedback=validation_result.feedback
+            )
+
+            # Update habit streak if task completed successfully
+            if is_valid:
+                current_streak = habit.streak or 0
+                await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=current_streak + 1)
+        else:
+            # Fallback validation - assume valid for now
+            await crud.validate_task_proof(
+                db=db,
+                task_id=task_id,
+                validation_result=True,
+                confidence=0.8,
+                feedback="Proof submitted successfully"
+            )
+
+        # Get updated task
+        updated_task = await crud.get_task_by_id(db=db, task_id=task_id, user_id=current_user.id)
 
         return {
             "success": True,
-            "task": task,
-            "message": "Proof submitted successfully"
+            "task": updated_task,
+            "file_url": file_url,
+            "validation": {
+                "is_valid": validation_result.is_valid if validation_result else True,
+                "confidence": validation_result.confidence if validation_result else 0.8,
+                "feedback": validation_result.feedback if validation_result else "Proof submitted successfully",
+                "suggestions": validation_result.suggestions if validation_result else []
+            },
+            "message": "Proof submitted and validated successfully"
         }
 
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
+        logger.error(f"Error submitting proof: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to submit proof: {str(e)}")
 
 @router.put("/tasks/{task_id}/status")
@@ -235,6 +316,87 @@ async def update_task_status(
         raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to update task status: {str(e)}")
+
+@router.put("/tasks/{task_id}/mark-missed")
+async def mark_task_missed(
+    task_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Mark a task as missed (for expired tasks)"""
+    try:
+        # Get task to verify ownership
+        task = await crud.get_task_by_id(db=db, task_id=task_id, user_id=current_user.id)
+        if not task:
+            raise HTTPException(status_code=404, detail="Task not found")
+
+        # Check if task is eligible to be marked as missed
+        if task.status != "pending":
+            raise HTTPException(status_code=400, detail="Only pending tasks can be marked as missed")
+
+        # Update task status to missed
+        task = await crud.update_task_status(
+            db=db,
+            task_id=task_id,
+            user_id=current_user.id,
+            status="missed"
+        )
+
+        # Update habit streak (reset to 0 for missed tasks)
+        habit = await crud.get_habit(db=db, habit_id=task.habit_id, user_id=current_user.id)
+        if habit:
+            await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
+
+        return {
+            "success": True,
+            "task": task,
+            "message": "Task marked as missed"
+        }
+
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to mark task as missed: {str(e)}")
+
+@router.post("/tasks/check-expired")
+async def check_and_mark_expired_tasks(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Check for expired tasks and mark them as missed"""
+    try:
+        # Get all pending tasks for the user
+        pending_tasks = await crud.get_pending_tasks(db=db, user_id=current_user.id)
+
+        expired_tasks = []
+        current_time = datetime.utcnow()
+
+        for task in pending_tasks:
+            # Check if task is expired (past due date)
+            if task.due_date and task.due_date < current_time:
+                # Mark as missed
+                updated_task = await crud.update_task_status(
+                    db=db,
+                    task_id=task.id,
+                    user_id=current_user.id,
+                    status="missed"
+                )
+
+                # Reset habit streak
+                habit = await crud.get_habit(db=db, habit_id=task.habit_id, user_id=current_user.id)
+                if habit:
+                    await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
+
+                expired_tasks.append(updated_task)
+
+        return {
+            "success": True,
+            "expired_tasks": expired_tasks,
+            "count": len(expired_tasks)
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to check expired tasks: {str(e)}")
 
 # --- AI Task Generation Endpoints ---
 

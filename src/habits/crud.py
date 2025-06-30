@@ -322,3 +322,35 @@ async def create_ability_entry(db: AsyncSession, user_id: str, entry):
     await db.commit()
     await db.refresh(db_entry)
     return db_entry
+
+async def get_task_by_id(
+    db: AsyncSession,
+    task_id: int,
+    user_id: int
+) -> Optional[models.TaskEntry]:
+    """Get a task by ID and verify ownership"""
+    result = await db.execute(
+        select(models.TaskEntry).filter(
+            models.TaskEntry.id == task_id,
+            models.TaskEntry.user_id == user_id
+        )
+    )
+    return result.scalar_one_or_none()
+
+async def update_habit_streak(
+    db: AsyncSession,
+    habit_id: int,
+    streak_count: int
+) -> models.Habit:
+    """Update habit streak count"""
+    result = await db.execute(
+        select(models.Habit).filter(models.Habit.id == habit_id)
+    )
+    habit = result.scalar_one_or_none()
+
+    if habit:
+        habit.streak = streak_count
+        await db.commit()
+        await db.refresh(habit)
+
+    return habit

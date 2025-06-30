@@ -21,8 +21,6 @@ class UserSchema(BaseModel):
 
 class UsernameUpdateSchema(BaseModel):
     username: str
-
-
 class ProfileImageUpdateSchema(BaseModel):
     profile_image_url: str
 
@@ -32,3 +30,5 @@ class ProfileUpdateSchema(BaseModel):
     name: Optional[str] = None
     username: Optional[str] = None
     bio: Optional[str] = None
+
+

@@ -1,0 +1,1 @@
+# Chat module for real-time messaging between friends

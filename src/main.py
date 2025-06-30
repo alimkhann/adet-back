@@ -16,6 +16,7 @@ from .webhooks.api import router as webhooks_router
 from .habits.api import router as habits_router
 from .friends.api import router as friends_router
 from .chats.api import router as chats_router
+from .posts.api import router as posts_router
 
 
 @asynccontextmanager
@@ -58,6 +59,7 @@ api_router.include_router(onboarding_router, prefix="/onboarding", tags=["Onboar
 api_router.include_router(habits_router, prefix="/habits", tags=["Habits"])
 api_router.include_router(friends_router, prefix="/friends", tags=["Friends"])
 api_router.include_router(chats_router, prefix="/chats", tags=["Chats"])
+api_router.include_router(posts_router, tags=["Posts"])
 
 app.include_router(api_router)
 app.include_router(webhooks_router, tags=["webhooks"])

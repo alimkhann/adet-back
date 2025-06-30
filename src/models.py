@@ -14,4 +14,5 @@ from .habits.models import (
 )
 from .friends.models import Friendship, FriendRequest, CloseFriend
 from .chats.models import Conversation, Message, ConversationParticipant
+from .posts.models import Post, PostComment, PostLike, PostView, PostReport
 

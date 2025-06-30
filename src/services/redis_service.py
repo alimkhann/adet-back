@@ -11,6 +11,7 @@ class RedisSettings(BaseSettings):
 
     class Config:
         env_file = ".env"
+        extra = "ignore"  # Ignore extra environment variables
 
 class RedisService:
     def __init__(self):

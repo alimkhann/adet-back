@@ -118,13 +118,14 @@ class TaskEntry(Base):
     # Relationships
     habit = relationship("Habit", back_populates="task_entries")
     user = relationship("User", back_populates="task_entries")
+    validations = relationship("TaskValidation", back_populates="task_entry", cascade="all, delete-orphan")
 
 class TaskValidation(Base):
     """AI validation results for task proofs"""
     __tablename__ = "task_validations"
 
     id = Column(Integer, primary_key=True, index=True)
-    task_entry_id = Column(Integer, ForeignKey("task_entries.id"), nullable=False)
+    task_entry_id = Column(Integer, ForeignKey("task_entries.id", ondelete="CASCADE"), nullable=False)
 
     # Validation details
     is_valid = Column(Boolean, nullable=False)
@@ -141,5 +142,5 @@ class TaskValidation(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    task_entry = relationship("TaskEntry")
+    task_entry = relationship("TaskEntry", back_populates="validations")
 

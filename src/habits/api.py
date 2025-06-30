@@ -4,6 +4,7 @@ from typing import List
 from datetime import date, datetime, timedelta
 from pytz import UTC
 import logging
+import pytz
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
@@ -91,6 +92,7 @@ async def generate_and_create_task(
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):
+    print("[DEBUG] /generate-and-create-task called")
     """Generate AI task and create it in the database"""
     try:
         # Get habit details
@@ -110,6 +112,25 @@ async def generate_and_create_task(
             habit_id=habit_id,
             days=7
         )
+
+        # Calculate due date in user's timezone if provided
+        user_tz = None
+        if hasattr(task_request, 'user_timezone') and task_request.user_timezone:
+            try:
+                user_tz = pytz.timezone(task_request.user_timezone)
+            except Exception:
+                user_tz = pytz.timezone('UTC')
+        else:
+            user_tz = pytz.timezone('UTC')
+
+        now_local = datetime.now(user_tz)
+        due_date_local = now_local + timedelta(hours=4)
+        due_date_utc = due_date_local.astimezone(pytz.utc)
+
+        logger.info(f"[TaskGen] user_timezone: {user_tz}")
+        logger.info(f"[TaskGen] now_local: {now_local.isoformat()}")
+        logger.info(f"[TaskGen] due_date_local: {due_date_local.isoformat()}")
+        logger.info(f"[TaskGen] due_date_utc: {due_date_utc.isoformat()}")
 
         # Create task generation context
         context = TaskGenerationContext(
@@ -153,7 +174,7 @@ async def generate_and_create_task(
             user_id=current_user.id,
             task_data=response.data,
             assigned_date=date.today(),
-            due_date=datetime.utcnow() + timedelta(hours=4)
+            due_date=due_date_utc.replace(tzinfo=None)  # store as naive UTC
         )
 
         # Commit and refresh the entry

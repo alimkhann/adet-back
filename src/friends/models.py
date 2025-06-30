@@ -60,3 +60,27 @@ class FriendRequest(Base):
         Index('idx_friend_request_status', 'status'),
         Index('idx_friend_request_created_at', 'created_at'),
     )
+
+
+class CloseFriend(Base):
+    """
+    Represents a one-way close friend relationship.
+    User A can add User B as a close friend without B's consent.
+    """
+    __tablename__ = "close_friends"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    close_friend_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    user = relationship("User", foreign_keys=[user_id], back_populates="close_friends")
+    close_friend = relationship("User", foreign_keys=[close_friend_id])
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('user_id', 'close_friend_id', name='unique_close_friend'),
+        Index('idx_close_friend_user_id', 'user_id'),
+        Index('idx_close_friend_close_friend_id', 'close_friend_id'),
+    )

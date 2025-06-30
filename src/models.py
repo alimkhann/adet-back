@@ -12,6 +12,6 @@ from .habits.models import (
     TaskEntry,
     TaskValidation
 )
-from .friends.models import Friendship, FriendRequest
+from .friends.models import Friendship, FriendRequest, CloseFriend
 from .chats.models import Conversation, Message, ConversationParticipant
 

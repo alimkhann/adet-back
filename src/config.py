@@ -7,9 +7,9 @@ class Settings(BaseSettings):
     clerk_domain: str
     clerk_webhook_secret: str
     clerk_secret_key: str
-    # redis_url: str = "redis://localhost:6379/0"
-    # celery_broker_url: str = "redis://localhost:6379/0"
-    # celery_result_backend: str = "redis://localhost:6379/0"
+    redis_url: str
+    celery_broker_url: str
+    celery_result_backend: str
 
     # AI Configuration
     openai_api_key: str | None = None

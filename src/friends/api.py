@@ -143,6 +143,79 @@ async def remove_friend(
     )
 
 
+# MARK: - Close Friends Endpoints
+
+@router.get("/close-friends", response_model=schemas.CloseFriendsResponse, summary="Get Close Friends")
+async def get_close_friends(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get the current user's close friends list.
+    """
+    close_friends = await FriendsService.get_close_friends(db, current_user.id)
+
+    return schemas.CloseFriendsResponse(
+        close_friends=close_friends,
+        count=len(close_friends)
+    )
+
+
+@router.post("/close-friends", response_model=schemas.CloseFriendActionResponse, summary="Update Close Friend")
+async def update_close_friend(
+    request_data: schemas.CloseFriendCreate,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Add or remove someone from close friends list.
+    """
+    if request_data.is_close_friend:
+        # Add to close friends
+        close_friend = await FriendsService.add_close_friend(
+            db, current_user.id, request_data.friend_id
+        )
+
+        if not close_friend:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Cannot add non-friend as close friend"
+            )
+
+        return schemas.CloseFriendActionResponse(
+            success=True,
+            message="Added to close friends",
+            close_friend=close_friend
+        )
+    else:
+        # Remove from close friends
+        success = await FriendsService.remove_close_friend(
+            db, current_user.id, request_data.friend_id
+        )
+
+        return schemas.CloseFriendActionResponse(
+            success=success,
+            message="Removed from close friends" if success else "Not in close friends"
+        )
+
+
+@router.get("/close-friends/{friend_id}/check", summary="Check Close Friend Status")
+async def check_close_friend_status(
+    friend_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Check if a specific friend is in the close friends list.
+    """
+    is_close_friend = await FriendsService.is_close_friend(db, current_user.id, friend_id)
+
+    return {
+        "friend_id": friend_id,
+        "is_close_friend": is_close_friend
+    }
+
+
 @router.get("/search", response_model=schemas.UserSearchResponse, summary="Search Users")
 async def search_users(
     q: str = Query(..., min_length=2, description="Search query (minimum 2 characters)"),

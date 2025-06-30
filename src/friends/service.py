@@ -1,12 +1,12 @@
 """
 Friends service layer containing business logic for friendship operations.
 """
-from typing import List, Tuple
+from typing import List, Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from .crud import FriendshipCRUD, FriendRequestCRUD, UserSearchCRUD
-from .models import Friendship, FriendRequest
+from .crud import FriendshipCRUD, FriendRequestCRUD, UserSearchCRUD, CloseFriendCRUD
+from .models import Friendship, FriendRequest, CloseFriend
 from ..auth.models import User as UserModel
 
 
@@ -211,8 +211,65 @@ class FriendsService:
                 detail="You are not friends with this user"
             )
 
+        # Remove from close friends if applicable
+        await CloseFriendCRUD.remove_close_friend(db, current_user_id, friend_id)
+
         # Remove the friendship
         return await FriendshipCRUD.delete_friendship(db, current_user_id, friend_id)
+
+    # MARK: - Close Friends Methods
+
+    @staticmethod
+    async def get_close_friends(db: AsyncSession, user_id: int) -> List[UserModel]:
+        """Get close friends for a user"""
+        return await CloseFriendCRUD.get_close_friends(db, user_id)
+
+    @staticmethod
+    async def is_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> bool:
+        """Check if someone is a close friend"""
+        return await CloseFriendCRUD.is_close_friend(db, user_id, friend_id)
+
+    @staticmethod
+    async def add_close_friend(
+        db: AsyncSession,
+        user_id: int,
+        friend_id: int
+    ) -> Optional[CloseFriend]:
+        """Add someone as a close friend"""
+        # Validate friend exists
+        friend = await UserSearchCRUD.get_user_by_id(db, friend_id)
+        if not friend:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Check close friends limit
+        current_count = await CloseFriendCRUD.get_close_friends_count(db, user_id)
+        if current_count >= 50:  # Content limit from frontend
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Maximum close friends limit reached (50)"
+            )
+
+        # Add as close friend
+        close_friend = await CloseFriendCRUD.add_close_friend(db, user_id, friend_id)
+        if not close_friend:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You can only add friends as close friends"
+            )
+
+        return close_friend
+
+    @staticmethod
+    async def remove_close_friend(
+        db: AsyncSession,
+        user_id: int,
+        friend_id: int
+    ) -> bool:
+        """Remove someone from close friends"""
+        return await CloseFriendCRUD.remove_close_friend(db, user_id, friend_id)
 
     @staticmethod
     async def search_users(

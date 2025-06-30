@@ -72,6 +72,30 @@ class FriendRequestRead(FriendRequestBase):
         from_attributes = True
 
 
+# Close Friends schemas
+class CloseFriendBase(BaseModel):
+    """Base close friend schema"""
+    pass
+
+
+class CloseFriendCreate(BaseModel):
+    """Schema for creating close friend relationship"""
+    friend_id: int
+    is_close_friend: bool
+
+
+class CloseFriendRead(CloseFriendBase):
+    """Schema for reading close friends"""
+    id: int
+    user_id: int
+    close_friend_id: int
+    close_friend: UserBasic
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
 # Response schemas
 class FriendsListResponse(BaseModel):
     """Response schema for friends list"""
@@ -85,6 +109,12 @@ class FriendRequestsResponse(BaseModel):
     outgoing_requests: List[FriendRequestRead]
     incoming_count: int
     outgoing_count: int
+
+
+class CloseFriendsResponse(BaseModel):
+    """Response schema for close friends list"""
+    close_friends: List[UserBasic]
+    count: int
 
 
 class UserSearchResponse(BaseModel):
@@ -107,3 +137,10 @@ class FriendRequestActionResponse(BaseModel):
     success: bool
     message: str
     request: Optional[FriendRequestRead] = None
+
+
+class CloseFriendActionResponse(BaseModel):
+    """Response schema for close friend actions"""
+    success: bool
+    message: str
+    close_friend: Optional[CloseFriendRead] = None

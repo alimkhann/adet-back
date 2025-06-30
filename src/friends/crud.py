@@ -4,8 +4,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_
 from sqlalchemy.orm import selectinload
 
-from .models import Friendship, FriendRequest
+from .models import Friendship, FriendRequest, CloseFriend
 from ..auth.models import User as UserModel
+from ..services.redis_service import redis_service
 
 
 class FriendshipCRUD:
@@ -209,6 +210,134 @@ class FriendRequestCRUD:
             return True
 
         return False
+
+
+class CloseFriendCRUD:
+    """CRUD operations for close friends"""
+
+    @staticmethod
+    async def get_close_friends(db: AsyncSession, user_id: int) -> List[UserModel]:
+        """Get close friends for a user with caching"""
+        # Try to get from cache first
+        cached_friends = redis_service.get_cached_close_friends(user_id)
+        if cached_friends is not None:
+            # Get user details for cached IDs
+            result = await db.execute(
+                select(UserModel)
+                .where(UserModel.id.in_(cached_friends))
+                .order_by(UserModel.username)
+            )
+            return result.scalars().all()
+
+        # Get from database
+        result = await db.execute(
+            select(CloseFriend)
+            .where(CloseFriend.user_id == user_id)
+            .options(selectinload(CloseFriend.close_friend))
+            .order_by(CloseFriend.created_at.desc())
+        )
+        close_friends = result.scalars().all()
+
+        # Extract user objects and IDs for caching
+        user_objects = [cf.close_friend for cf in close_friends]
+        user_ids = [cf.close_friend_id for cf in close_friends]
+
+        # Cache the IDs
+        redis_service.cache_close_friends(user_id, user_ids)
+
+        return user_objects
+
+    @staticmethod
+    async def is_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> bool:
+        """Check if someone is a close friend"""
+        # Try cache first
+        cached_friends = redis_service.get_cached_close_friends(user_id)
+        if cached_friends is not None:
+            return friend_id in cached_friends
+
+        # Check database
+        result = await db.execute(
+            select(CloseFriend)
+            .where(and_(
+                CloseFriend.user_id == user_id,
+                CloseFriend.close_friend_id == friend_id
+            ))
+        )
+        return result.scalars().first() is not None
+
+    @staticmethod
+    async def add_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> Optional[CloseFriend]:
+        """Add someone as a close friend"""
+        # Check if they are actually friends first
+        are_friends = await FriendshipCRUD.are_friends(db, user_id, friend_id)
+        if not are_friends:
+            return None
+
+        # Check if already close friend
+        is_already_close = await CloseFriendCRUD.is_close_friend(db, user_id, friend_id)
+        if is_already_close:
+            # Return existing relationship
+            result = await db.execute(
+                select(CloseFriend)
+                .where(and_(
+                    CloseFriend.user_id == user_id,
+                    CloseFriend.close_friend_id == friend_id
+                ))
+                .options(selectinload(CloseFriend.close_friend))
+            )
+            return result.scalars().first()
+
+        # Create new close friend relationship
+        close_friend = CloseFriend(
+            user_id=user_id,
+            close_friend_id=friend_id
+        )
+
+        db.add(close_friend)
+        await db.commit()
+        await db.refresh(close_friend)
+
+        # Invalidate cache
+        redis_service.invalidate_close_friends_cache(user_id)
+
+        return close_friend
+
+    @staticmethod
+    async def remove_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> bool:
+        """Remove someone from close friends"""
+        result = await db.execute(
+            select(CloseFriend)
+            .where(and_(
+                CloseFriend.user_id == user_id,
+                CloseFriend.close_friend_id == friend_id
+            ))
+        )
+        close_friend = result.scalars().first()
+
+        if close_friend:
+            await db.delete(close_friend)
+            await db.commit()
+
+            # Invalidate cache
+            redis_service.invalidate_close_friends_cache(user_id)
+            return True
+
+        return False
+
+    @staticmethod
+    async def get_close_friends_count(db: AsyncSession, user_id: int) -> int:
+        """Get count of close friends for a user"""
+        # Try cache first
+        cached_friends = redis_service.get_cached_close_friends(user_id)
+        if cached_friends is not None:
+            return len(cached_friends)
+
+        # Count from database
+        result = await db.execute(
+            select(CloseFriend)
+            .where(CloseFriend.user_id == user_id)
+        )
+        return len(result.scalars().all())
 
 
 class UserSearchCRUD:

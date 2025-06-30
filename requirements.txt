@@ -20,3 +20,4 @@ pytz>=2025.1
 Pillow>=10.0.0
 websockets>=12.0
 python-socketio>=5.10.0
+redis>=5.0.0

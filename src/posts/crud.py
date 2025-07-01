@@ -24,7 +24,8 @@ class PostCRUD:
         proof_urls: List[str],
         proof_type: str,
         description: Optional[str],
-        privacy: str
+        privacy: str,
+        habit_streak: Optional[int] = None
     ) -> Post:
         """Create a new post"""
         post = Post(
@@ -33,14 +34,15 @@ class PostCRUD:
             proof_urls=proof_urls,
             proof_type=proof_type,
             description=description,
-            privacy=privacy
+            privacy=privacy,
+            habit_streak=habit_streak
         )
 
         db.add(post)
         await db.commit()
         await db.refresh(post)
 
-        logger.info(f"Created post {post.id} for user {user_id}")
+        logger.info(f"Created post {post.id} for user {user_id} with streak {habit_streak}")
         return post
 
     @staticmethod
@@ -377,14 +379,16 @@ class PostLikeCRUD:
     async def _update_post_likes_count(db: AsyncSession, post_id: int, delta: int):
         """Update post likes count"""
         await db.execute(
-            f"UPDATE posts SET likes_count = likes_count + {delta} WHERE id = {post_id}"
+            text("UPDATE posts SET likes_count = likes_count + :delta WHERE id = :post_id"),
+            {"delta": delta, "post_id": post_id}
         )
 
     @staticmethod
     async def _update_comment_likes_count(db: AsyncSession, comment_id: int, delta: int):
         """Update comment likes count"""
         await db.execute(
-            f"UPDATE post_comments SET likes_count = likes_count + {delta} WHERE id = {comment_id}"
+            text("UPDATE post_comments SET likes_count = likes_count + :delta WHERE id = :comment_id"),
+            {"delta": delta, "comment_id": comment_id}
         )
 
     @staticmethod
@@ -434,7 +438,8 @@ class PostCommentCRUD:
         # Update parent comment replies count if this is a reply
         if parent_comment_id:
             await db.execute(
-                f"UPDATE post_comments SET replies_count = replies_count + 1 WHERE id = {parent_comment_id}"
+                text("UPDATE post_comments SET replies_count = replies_count + 1 WHERE id = :comment_id"),
+                {"comment_id": parent_comment_id}
             )
 
         await db.commit()
@@ -524,8 +529,8 @@ class PostViewCRUD:
         user_id: int,
         view_duration: Optional[int] = None
     ) -> PostView:
-        """Mark a post as viewed (upsert)"""
-        # Check if view already exists
+        """Mark a post as viewed by user"""
+        # Check if already viewed
         existing_view = await db.execute(
             select(PostView)
             .where(and_(
@@ -537,9 +542,9 @@ class PostViewCRUD:
 
         if view:
             # Update existing view
-            view.viewed_at = datetime.utcnow()
             if view_duration is not None:
                 view.view_duration = view_duration
+            view.viewed_at = datetime.utcnow()
         else:
             # Create new view
             view = PostView(
@@ -557,7 +562,6 @@ class PostViewCRUD:
 
         await db.commit()
         await db.refresh(view)
-
         return view
 
     @staticmethod
@@ -566,14 +570,14 @@ class PostViewCRUD:
         post_ids: List[int],
         user_id: int
     ) -> int:
-        """Mark multiple posts as viewed, returns count of newly viewed posts"""
-        processed = 0
-
+        """Mark multiple posts as viewed"""
+        processed_count = 0
         for post_id in post_ids:
             try:
                 await PostViewCRUD.mark_post_as_viewed(db, post_id, user_id)
-                processed += 1
+                processed_count += 1
             except Exception as e:
-                logger.warning(f"Failed to mark post {post_id} as viewed: {e}")
+                logger.error(f"Failed to mark post {post_id} as viewed: {e}")
+                continue
 
-        return processed
+        return processed_count

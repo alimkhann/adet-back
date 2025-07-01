@@ -39,6 +39,9 @@ class Post(Base):
     # Privacy and visibility
     privacy = Column(String, nullable=False, default="friends")  # PostPrivacy enum value
 
+    # Habit streak at time of post creation
+    habit_streak = Column(Integer, nullable=True)
+
     # Analytics
     views_count = Column(Integer, nullable=False, default=0)
     likes_count = Column(Integer, nullable=False, default=0)
@@ -61,6 +64,7 @@ class Post(Base):
         Index('idx_post_privacy', 'privacy'),
         Index('idx_post_created_at', 'created_at'),
         Index('idx_post_habit_id', 'habit_id'),
+        Index('idx_post_habit_streak', 'habit_streak'),
     )
 
 

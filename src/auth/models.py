@@ -41,5 +41,5 @@ class User(Base):
     # Relationship with received friend requests
     received_friend_requests = relationship("FriendRequest", foreign_keys="FriendRequest.receiver_id", back_populates="receiver", cascade="all, delete-orphan")
 
-    # Relationship with close friends (users that this user marked as close friends)
+    # Relationship with close friends (as user)
     close_friends = relationship("CloseFriend", foreign_keys="CloseFriend.user_id", back_populates="user", cascade="all, delete-orphan")

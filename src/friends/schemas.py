@@ -144,3 +144,106 @@ class CloseFriendActionResponse(BaseModel):
     success: bool
     message: str
     close_friend: Optional[CloseFriendRead] = None
+    incoming_count: int
+    outgoing_count: int
+
+
+class CloseFriendsResponse(BaseModel):
+    """Response schema for close friends list"""
+    close_friends: List[UserBasic]
+    count: int
+
+
+class UserSearchResponse(BaseModel):
+    """Response schema for user search"""
+    users: List[UserBasic]
+    count: int
+    query: str
+
+
+# Action response schemas
+class FriendActionResponse(BaseModel):
+    """Response schema for friend actions"""
+    success: bool
+    message: str
+    friendship: Optional[FriendshipRead] = None
+
+
+class FriendRequestActionResponse(BaseModel):
+    """Response schema for friend request actions"""
+    success: bool
+    message: str
+    request: Optional[FriendRequestRead] = None
+
+
+class CloseFriendActionResponse(BaseModel):
+    """Response schema for close friend actions"""
+    success: bool
+    message: str
+    close_friend: Optional[CloseFriendRead] = None
+    incoming_count: int
+    outgoing_count: int
+
+
+class CloseFriendsResponse(BaseModel):
+    """Response schema for close friends list"""
+    close_friends: List[UserBasic]
+    count: int
+
+
+class UserSearchResponse(BaseModel):
+    """Response schema for user search"""
+    users: List[UserBasic]
+    count: int
+    query: str
+
+
+# Action response schemas
+class FriendActionResponse(BaseModel):
+    """Response schema for friend actions"""
+    success: bool
+    message: str
+    friendship: Optional[FriendshipRead] = None
+
+
+class FriendRequestActionResponse(BaseModel):
+    """Response schema for friend request actions"""
+    success: bool
+    message: str
+    request: Optional[FriendRequestRead] = None
+
+
+class CloseFriendActionResponse(BaseModel):
+    """Response schema for close friend actions"""
+    success: bool
+    message: str
+    close_friend: Optional[CloseFriendRead] = None
+    incoming_count: int
+    outgoing_count: int
+
+
+class CloseFriendsResponse(BaseModel):
+    """Response schema for close friends list"""
+    close_friends: List[UserBasic]
+    count: int
+
+
+class UserSearchResponse(BaseModel):
+    """Response schema for user search"""
+    users: List[UserBasic]
+    count: int
+    query: str
+
+
+# Action response schemas
+class FriendActionResponse(BaseModel):
+    """Response schema for friend actions"""
+    success: bool
+    message: str
+    friendship: Optional[FriendshipRead] = None
+
+
+class FriendRequestActionResponse(BaseModel):
+    """Response schema for friend request actions"""
+    success: bool
+    message: str

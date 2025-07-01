@@ -61,7 +61,6 @@ class FriendRequest(Base):
         Index('idx_friend_request_created_at', 'created_at'),
     )
 
-
 class CloseFriend(Base):
     """
     Represents a one-way close friend relationship.

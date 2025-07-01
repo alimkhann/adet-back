@@ -61,6 +61,9 @@ class PostRead(PostBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
 
+    # Habit streak at time of post creation
+    habit_streak: Optional[int] = None
+
     # Analytics
     views_count: int = 0
     likes_count: int = 0

@@ -121,6 +121,36 @@ async def update_username(
         )
 
 
+@router.patch("/me/profile", response_model=UserSchema, summary="Update User Profile")
+async def update_profile(
+    profile_update: ProfileUpdateSchema,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    """
+    Updates the user's profile information (name, username, bio).
+    """
+    try:
+        updated_user = await AuthService.update_user_profile(
+            user_id=current_user.id,
+            db=db,
+            name=profile_update.name,
+            username=profile_update.username,
+            bio=profile_update.bio
+        )
+        return updated_user
+    except UserNotFoundException as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except ValueError as e:
+        # Handle username already taken or validation errors
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to update profile: {str(e)}"
+        )
+
+
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT, summary="Delete User Account")
 async def delete_account(
     current_user: UserModel = Depends(get_current_user),

@@ -244,15 +244,7 @@ class FriendsService:
                 detail="User not found"
             )
 
-        # Check close friends limit
-        current_count = await CloseFriendCRUD.get_close_friends_count(db, user_id)
-        if current_count >= 50:  # Content limit from frontend
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Maximum close friends limit reached (50)"
-            )
-
-        # Add as close friend
+        # Add as close friend (removed limit check)
         close_friend = await CloseFriendCRUD.add_close_friend(db, user_id, friend_id)
         if not close_friend:
             raise HTTPException(

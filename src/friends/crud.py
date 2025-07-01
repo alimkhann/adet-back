@@ -53,7 +53,7 @@ class FriendshipCRUD:
 
     @staticmethod
     async def delete_friendship(db: AsyncSession, user_id: int, friend_id: int) -> bool:
-        """Delete bidirectional friendship"""
+        """Delete a bidirectional friendship"""
         # Delete both directions of the friendship
         result1 = await db.execute(
             select(Friendship)
@@ -73,13 +73,19 @@ class FriendshipCRUD:
         )
         friendship2 = result2.scalars().first()
 
+        deleted = False
         if friendship1:
             await db.delete(friendship1)
+            deleted = True
+
         if friendship2:
             await db.delete(friendship2)
+            deleted = True
 
-        await db.commit()
-        return True
+        if deleted:
+            await db.commit()
+
+        return deleted
 
     @staticmethod
     async def are_friends(db: AsyncSession, user_id: int, friend_id: int) -> bool:
@@ -128,7 +134,7 @@ class FriendRequestCRUD:
 
     @staticmethod
     async def get_request_by_id(db: AsyncSession, request_id: int) -> Optional[FriendRequest]:
-        """Get friend request by ID"""
+        """Get a friend request by ID"""
         result = await db.execute(
             select(FriendRequest)
             .where(FriendRequest.id == request_id)
@@ -138,7 +144,7 @@ class FriendRequestCRUD:
 
     @staticmethod
     async def get_existing_request(db: AsyncSession, sender_id: int, receiver_id: int) -> Optional[FriendRequest]:
-        """Get existing friend request between two users"""
+        """Check if a friend request already exists between two users"""
         result = await db.execute(
             select(FriendRequest)
             .where(and_(
@@ -157,14 +163,13 @@ class FriendRequestCRUD:
         message: Optional[str] = None
     ) -> FriendRequest:
         """Create a new friend request"""
-        # Set expiration to 30 days from now
-        expires_at = datetime.utcnow() + timedelta(days=30)
+        expires_at = datetime.utcnow() + timedelta(days=30)  # Requests expire after 30 days
 
         friend_request = FriendRequest(
             sender_id=sender_id,
             receiver_id=receiver_id,
-            message=message,
             status="pending",
+            message=message,
             expires_at=expires_at
         )
 
@@ -180,7 +185,7 @@ class FriendRequestCRUD:
         request_id: int,
         status: str
     ) -> Optional[FriendRequest]:
-        """Update friend request status"""
+        """Update the status of a friend request"""
         result = await db.execute(
             select(FriendRequest)
             .where(FriendRequest.id == request_id)
@@ -401,388 +406,3 @@ class UserSearchCRUD:
             return "request_received"
 
         return "none"
-
-        # Check if already close friend
-        is_already_close = await CloseFriendCRUD.is_close_friend(db, user_id, friend_id)
-        if is_already_close:
-            # Return existing relationship
-            result = await db.execute(
-                select(CloseFriend)
-                .where(and_(
-                    CloseFriend.user_id == user_id,
-                    CloseFriend.close_friend_id == friend_id
-                ))
-                .options(selectinload(CloseFriend.close_friend))
-            )
-            return result.scalars().first()
-
-        # Create new close friend relationship
-        close_friend = CloseFriend(
-            user_id=user_id,
-            close_friend_id=friend_id
-        )
-
-        db.add(close_friend)
-        await db.commit()
-        await db.refresh(close_friend)
-
-        # Invalidate cache
-        redis_service.invalidate_close_friends_cache(user_id)
-
-        return close_friend
-
-    @staticmethod
-    async def remove_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> bool:
-        """Remove someone from close friends"""
-        result = await db.execute(
-            select(CloseFriend)
-            .where(and_(
-                CloseFriend.user_id == user_id,
-                CloseFriend.close_friend_id == friend_id
-            ))
-        )
-        close_friend = result.scalars().first()
-
-        if close_friend:
-            await db.delete(close_friend)
-            await db.commit()
-
-            # Invalidate cache
-            redis_service.invalidate_close_friends_cache(user_id)
-            return True
-
-        return False
-
-    @staticmethod
-    async def get_close_friends_count(db: AsyncSession, user_id: int) -> int:
-        """Get count of close friends for a user"""
-        # Try cache first
-        cached_friends = redis_service.get_cached_close_friends(user_id)
-        if cached_friends is not None:
-            return len(cached_friends)
-
-        # Count from database
-        result = await db.execute(
-            select(CloseFriend)
-            .where(CloseFriend.user_id == user_id)
-        )
-        return len(result.scalars().all())
-
-
-class UserSearchCRUD:
-    """CRUD operations for user search"""
-
-    @staticmethod
-    async def search_users_by_username(
-        db: AsyncSession,
-        query: str,
-        current_user_id: int,
-        limit: int = 20
-    ) -> List[UserModel]:
-        """Search users by username"""
-        result = await db.execute(
-            select(UserModel)
-            .where(and_(
-                UserModel.username.ilike(f"%{query}%"),
-                UserModel.id != current_user_id,  # Exclude current user
-                UserModel.is_active == True
-            ))
-            .limit(limit)
-            .order_by(UserModel.username)
-        )
-        return result.scalars().all()
-
-    @staticmethod
-    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[UserModel]:
-        """Get user by ID for profile viewing"""
-        result = await db.execute(
-            select(UserModel)
-            .where(and_(
-                UserModel.id == user_id,
-                UserModel.is_active == True
-            ))
-        )
-        return result.scalars().first()
-
-    @staticmethod
-    async def get_friendship_status(
-        db: AsyncSession,
-        current_user_id: int,
-        target_user_id: int
-    ) -> str:
-        """Get friendship status between two users"""
-        # Check if they are friends
-        friendship = await FriendshipCRUD.are_friends(db, current_user_id, target_user_id)
-        if friendship:
-            return "friends"
-
-        # Check for pending request (either direction)
-        outgoing_request = await FriendRequestCRUD.get_existing_request(
-            db, current_user_id, target_user_id
-        )
-        if outgoing_request:
-            return "request_sent"
-
-        incoming_request = await FriendRequestCRUD.get_existing_request(
-            db, target_user_id, current_user_id
-        )
-        if incoming_request:
-            return "request_received"
-
-        return "none"
-
-        # Check if already close friend
-        is_already_close = await CloseFriendCRUD.is_close_friend(db, user_id, friend_id)
-        if is_already_close:
-            # Return existing relationship
-            result = await db.execute(
-                select(CloseFriend)
-                .where(and_(
-                    CloseFriend.user_id == user_id,
-                    CloseFriend.close_friend_id == friend_id
-                ))
-                .options(selectinload(CloseFriend.close_friend))
-            )
-            return result.scalars().first()
-
-        # Create new close friend relationship
-        close_friend = CloseFriend(
-            user_id=user_id,
-            close_friend_id=friend_id
-        )
-
-        db.add(close_friend)
-        await db.commit()
-        await db.refresh(close_friend)
-
-        # Invalidate cache
-        redis_service.invalidate_close_friends_cache(user_id)
-
-        return close_friend
-
-    @staticmethod
-    async def remove_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> bool:
-        """Remove someone from close friends"""
-        result = await db.execute(
-            select(CloseFriend)
-            .where(and_(
-                CloseFriend.user_id == user_id,
-                CloseFriend.close_friend_id == friend_id
-            ))
-        )
-        close_friend = result.scalars().first()
-
-        if close_friend:
-            await db.delete(close_friend)
-            await db.commit()
-
-            # Invalidate cache
-            redis_service.invalidate_close_friends_cache(user_id)
-            return True
-
-        return False
-
-    @staticmethod
-    async def get_close_friends_count(db: AsyncSession, user_id: int) -> int:
-        """Get count of close friends for a user"""
-        # Try cache first
-        cached_friends = redis_service.get_cached_close_friends(user_id)
-        if cached_friends is not None:
-            return len(cached_friends)
-
-        # Count from database
-        result = await db.execute(
-            select(CloseFriend)
-            .where(CloseFriend.user_id == user_id)
-        )
-        return len(result.scalars().all())
-
-
-class UserSearchCRUD:
-    """CRUD operations for user search"""
-
-    @staticmethod
-    async def search_users_by_username(
-        db: AsyncSession,
-        query: str,
-        current_user_id: int,
-        limit: int = 20
-    ) -> List[UserModel]:
-        """Search users by username"""
-        result = await db.execute(
-            select(UserModel)
-            .where(and_(
-                UserModel.username.ilike(f"%{query}%"),
-                UserModel.id != current_user_id,  # Exclude current user
-                UserModel.is_active == True
-            ))
-            .limit(limit)
-            .order_by(UserModel.username)
-        )
-        return result.scalars().all()
-
-    @staticmethod
-    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[UserModel]:
-        """Get user by ID for profile viewing"""
-        result = await db.execute(
-            select(UserModel)
-            .where(and_(
-                UserModel.id == user_id,
-                UserModel.is_active == True
-            ))
-        )
-        return result.scalars().first()
-
-    @staticmethod
-    async def get_friendship_status(
-        db: AsyncSession,
-        current_user_id: int,
-        target_user_id: int
-    ) -> str:
-        """Get friendship status between two users"""
-        # Check if they are friends
-        friendship = await FriendshipCRUD.are_friends(db, current_user_id, target_user_id)
-        if friendship:
-            return "friends"
-
-        # Check for pending request (either direction)
-        outgoing_request = await FriendRequestCRUD.get_existing_request(
-            db, current_user_id, target_user_id
-        )
-        if outgoing_request:
-            return "request_sent"
-
-        incoming_request = await FriendRequestCRUD.get_existing_request(
-            db, target_user_id, current_user_id
-        )
-        if incoming_request:
-            return "request_received"
-
-        return "none"
-
-        # Check if already close friend
-        is_already_close = await CloseFriendCRUD.is_close_friend(db, user_id, friend_id)
-        if is_already_close:
-            # Return existing relationship
-            result = await db.execute(
-                select(CloseFriend)
-                .where(and_(
-                    CloseFriend.user_id == user_id,
-                    CloseFriend.close_friend_id == friend_id
-                ))
-                .options(selectinload(CloseFriend.close_friend))
-            )
-            return result.scalars().first()
-
-        # Create new close friend relationship
-        close_friend = CloseFriend(
-            user_id=user_id,
-            close_friend_id=friend_id
-        )
-
-        db.add(close_friend)
-        await db.commit()
-        await db.refresh(close_friend)
-
-        # Invalidate cache
-        redis_service.invalidate_close_friends_cache(user_id)
-
-        return close_friend
-
-    @staticmethod
-    async def remove_close_friend(db: AsyncSession, user_id: int, friend_id: int) -> bool:
-        """Remove someone from close friends"""
-        result = await db.execute(
-            select(CloseFriend)
-            .where(and_(
-                CloseFriend.user_id == user_id,
-                CloseFriend.close_friend_id == friend_id
-            ))
-        )
-        close_friend = result.scalars().first()
-
-        if close_friend:
-            await db.delete(close_friend)
-            await db.commit()
-
-            # Invalidate cache
-            redis_service.invalidate_close_friends_cache(user_id)
-            return True
-
-        return False
-
-    @staticmethod
-    async def get_close_friends_count(db: AsyncSession, user_id: int) -> int:
-        """Get count of close friends for a user"""
-        # Try cache first
-        cached_friends = redis_service.get_cached_close_friends(user_id)
-        if cached_friends is not None:
-            return len(cached_friends)
-
-        # Count from database
-        result = await db.execute(
-            select(CloseFriend)
-            .where(CloseFriend.user_id == user_id)
-        )
-        return len(result.scalars().all())
-
-
-class UserSearchCRUD:
-    """CRUD operations for user search"""
-
-    @staticmethod
-    async def search_users_by_username(
-        db: AsyncSession,
-        query: str,
-        current_user_id: int,
-        limit: int = 20
-    ) -> List[UserModel]:
-        """Search users by username"""
-        result = await db.execute(
-            select(UserModel)
-            .where(and_(
-                UserModel.username.ilike(f"%{query}%"),
-                UserModel.id != current_user_id,  # Exclude current user
-                UserModel.is_active == True
-            ))
-            .limit(limit)
-            .order_by(UserModel.username)
-        )
-        return result.scalars().all()
-
-    @staticmethod
-    async def get_user_by_id(db: AsyncSession, user_id: int) -> Optional[UserModel]:
-        """Get user by ID for profile viewing"""
-        result = await db.execute(
-            select(UserModel)
-            .where(and_(
-                UserModel.id == user_id,
-                UserModel.is_active == True
-            ))
-        )
-        return result.scalars().first()
-
-    @staticmethod
-    async def get_friendship_status(
-        db: AsyncSession,
-        current_user_id: int,
-        target_user_id: int
-    ) -> str:
-        """Get friendship status between two users"""
-        # Check if they are friends
-        friendship = await FriendshipCRUD.are_friends(db, current_user_id, target_user_id)
-        if friendship:
-            return "friends"
-
-        # Check for pending request (either direction)
-        outgoing_request = await FriendRequestCRUD.get_existing_request(
-            db, current_user_id, target_user_id
-        )
-        if outgoing_request:
-            return "request_sent"
-
-        incoming_request = await FriendRequestCRUD.get_existing_request(
-            db, target_user_id, current_user_id
-        )
-        if incoming_request:
-            return "request_received"

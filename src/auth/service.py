@@ -44,3 +44,30 @@ class AuthService:
         """Delete user account."""
         user = await UserDAO.get_user_by_id_or_raise(user_id, db)
         return await UserDAO.delete_user(user, db)
+
+    @staticmethod
+    async def update_user_profile(
+        user_id: int,
+        db: AsyncSession,
+        name: str = None,
+        username: str = None,
+        bio: str = None
+    ) -> UserModel:
+        """Update user profile information (name, username, bio)."""
+        user = await UserDAO.get_user_by_id_or_raise(user_id, db)
+
+        # Check if username is already taken by another user
+        if username and username != user.username:
+            existing_user = await UserDAO.get_user_by_username(username, db)
+            if existing_user and existing_user.id != user_id:
+                raise ValueError("Username already taken")
+
+        # Update fields if provided
+        if name is not None:
+            user.name = name
+        if username is not None:
+            user.username = username
+        if bio is not None:
+            user.bio = bio
+
+        return await UserDAO.update_user(user, db)

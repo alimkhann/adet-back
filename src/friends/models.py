@@ -83,3 +83,61 @@ class CloseFriend(Base):
         Index('idx_close_friend_user_id', 'user_id'),
         Index('idx_close_friend_close_friend_id', 'close_friend_id'),
     )
+
+
+class BlockedUser(Base):
+    """
+    Represents a blocking relationship between two users.
+    When User A blocks User B, only one record is created.
+    """
+    __tablename__ = "blocked_users"
+
+    id = Column(Integer, primary_key=True, index=True)
+    blocker_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    blocked_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String, nullable=True)  # Optional reason for blocking
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    blocker = relationship("User", foreign_keys=[blocker_id], back_populates="blocked_users")
+    blocked = relationship("User", foreign_keys=[blocked_id])
+
+    # Constraints
+    __table_args__ = (
+        UniqueConstraint('blocker_id', 'blocked_id', name='unique_blocked_user'),
+        Index('idx_blocked_user_blocker_id', 'blocker_id'),
+        Index('idx_blocked_user_blocked_id', 'blocked_id'),
+    )
+
+
+class UserReport(Base):
+    """
+    Represents a report against a user for inappropriate behavior.
+    Multiple reports can exist for the same user.
+    """
+    __tablename__ = "user_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    reporter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reported_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    category = Column(String, nullable=False)  # harassment, spam, inappropriate_content, fake_account, other
+    description = Column(String, nullable=True)  # Additional details
+    status = Column(String, nullable=False, default="pending")  # pending, reviewed, resolved, dismissed
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    # Relationships
+    reporter = relationship("User", foreign_keys=[reporter_id], back_populates="submitted_reports")
+    reported = relationship("User", foreign_keys=[reported_id], back_populates="received_reports")
+    reviewer = relationship("User", foreign_keys=[reviewed_by])
+
+    # Constraints
+    __table_args__ = (
+        Index('idx_user_report_reporter_id', 'reporter_id'),
+        Index('idx_user_report_reported_id', 'reported_id'),
+        Index('idx_user_report_status', 'status'),
+        Index('idx_user_report_category', 'category'),
+        Index('idx_user_report_created_at', 'created_at'),
+    )

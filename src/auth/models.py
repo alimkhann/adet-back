@@ -43,3 +43,12 @@ class User(Base):
 
     # Relationship with close friends (as user)
     close_friends = relationship("CloseFriend", foreign_keys="CloseFriend.user_id", back_populates="user", cascade="all, delete-orphan")
+
+    # Relationship with blocked users (as blocker)
+    blocked_users = relationship("BlockedUser", foreign_keys="BlockedUser.blocker_id", back_populates="blocker", cascade="all, delete-orphan")
+
+    # Relationship with submitted reports (as reporter)
+    submitted_reports = relationship("UserReport", foreign_keys="UserReport.reporter_id", back_populates="reporter", cascade="all, delete-orphan")
+
+    # Relationship with received reports (as reported user)
+    received_reports = relationship("UserReport", foreign_keys="UserReport.reported_id", back_populates="reported", cascade="all, delete-orphan")

@@ -5,8 +5,8 @@ from typing import List, Tuple, Optional
 from sqlalchemy.ext.asyncio import AsyncSession
 from fastapi import HTTPException, status
 
-from .crud import FriendshipCRUD, FriendRequestCRUD, UserSearchCRUD, CloseFriendCRUD
-from .models import Friendship, FriendRequest, CloseFriend
+from .crud import FriendshipCRUD, FriendRequestCRUD, UserSearchCRUD, CloseFriendCRUD, BlockedUserCRUD, UserReportCRUD
+from .models import Friendship, FriendRequest, CloseFriend, BlockedUser, UserReport
 from ..auth.models import User as UserModel
 
 
@@ -316,3 +316,190 @@ class FriendsService:
         """Get the count of friends for a user"""
         friends = await FriendshipCRUD.get_user_friends(db, user_id)
         return len(friends)
+
+    # MARK: - Blocking Methods
+
+    @staticmethod
+    async def block_user(
+        db: AsyncSession,
+        blocker_id: int,
+        blocked_id: int,
+        reason: Optional[str] = None
+    ) -> BlockedUser:
+        """Block a user and remove any existing relationships"""
+        # Validate users exist and are not the same
+        if blocker_id == blocked_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot block yourself"
+            )
+
+        # Check if user to block exists
+        blocked_user_obj = await UserSearchCRUD.get_user_by_id(db, blocked_id)
+        if not blocked_user_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Check if already blocked
+        existing_block = await BlockedUserCRUD.is_blocked(db, blocker_id, blocked_id)
+        if existing_block:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is already blocked"
+            )
+
+        # Remove any existing friendship
+        await FriendshipCRUD.delete_friendship(db, blocker_id, blocked_id)
+
+        # Remove from close friends
+        await CloseFriendCRUD.remove_close_friend(db, blocker_id, blocked_id)
+
+        # Cancel any pending friend requests between them
+        outgoing_request = await FriendRequestCRUD.get_existing_request(db, blocker_id, blocked_id)
+        if outgoing_request:
+            await FriendRequestCRUD.delete_request(db, outgoing_request.id)
+
+        incoming_request = await FriendRequestCRUD.get_existing_request(db, blocked_id, blocker_id)
+        if incoming_request:
+            await FriendRequestCRUD.delete_request(db, incoming_request.id)
+
+        # Create the block
+        return await BlockedUserCRUD.block_user(db, blocker_id, blocked_id, reason)
+
+    @staticmethod
+    async def unblock_user(
+        db: AsyncSession,
+        blocker_id: int,
+        blocked_id: int
+    ) -> bool:
+        """Unblock a user"""
+        # Validate user to unblock exists
+        blocked_user_obj = await UserSearchCRUD.get_user_by_id(db, blocked_id)
+        if not blocked_user_obj:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Check if actually blocked
+        existing_block = await BlockedUserCRUD.is_blocked(db, blocker_id, blocked_id)
+        if not existing_block:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="User is not blocked"
+            )
+
+        return await BlockedUserCRUD.unblock_user(db, blocker_id, blocked_id)
+
+    @staticmethod
+    async def get_blocked_users(db: AsyncSession, user_id: int) -> List[BlockedUser]:
+        """Get list of users blocked by a user"""
+        return await BlockedUserCRUD.get_blocked_users(db, user_id)
+
+    @staticmethod
+    async def is_user_blocked(
+        db: AsyncSession,
+        user_id: int,
+        by_user_id: int
+    ) -> bool:
+        """Check if a user is blocked by another user (bidirectional)"""
+        return await BlockedUserCRUD.is_user_blocked_by_anyone(db, user_id, by_user_id)
+
+    # MARK: - Reporting Methods
+
+    @staticmethod
+    async def report_user(
+        db: AsyncSession,
+        reporter_id: int,
+        reported_id: int,
+        category: str,
+        description: Optional[str] = None
+    ) -> UserReport:
+        """Report a user for inappropriate behavior"""
+        # Validate users exist and are not the same
+        if reporter_id == reported_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You cannot report yourself"
+            )
+
+        # Check if reported user exists
+        reported_user = await UserSearchCRUD.get_user_by_id(db, reported_id)
+        if not reported_user:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="User not found"
+            )
+
+        # Validate category
+        valid_categories = ["harassment", "spam", "inappropriate_content", "fake_account", "other"]
+        if category not in valid_categories:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid category. Must be one of: {', '.join(valid_categories)}"
+            )
+
+        # Check if user has already reported this user (prevent spam)
+        has_reported = await UserReportCRUD.has_user_reported(db, reporter_id, reported_id)
+        if has_reported:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="You have already reported this user"
+            )
+
+        return await UserReportCRUD.create_report(
+            db, reporter_id, reported_id, category, description
+        )
+
+    @staticmethod
+    async def get_user_reports(
+        db: AsyncSession,
+        reported_id: int,
+        limit: int = 50
+    ) -> List[UserReport]:
+        """Get reports for a specific user (admin only)"""
+        return await UserReportCRUD.get_reports_by_reported_user(db, reported_id, limit)
+
+    @staticmethod
+    async def get_reports_by_status(
+        db: AsyncSession,
+        status: str,
+        limit: int = 100
+    ) -> List[UserReport]:
+        """Get reports by status (admin only)"""
+        valid_statuses = ["pending", "reviewed", "resolved", "dismissed"]
+        if status not in valid_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+            )
+
+        return await UserReportCRUD.get_reports_by_status(db, status, limit)
+
+    @staticmethod
+    async def update_report_status(
+        db: AsyncSession,
+        report_id: int,
+        status: str,
+        reviewed_by: int
+    ) -> Optional[UserReport]:
+        """Update report status (admin only)"""
+        # Validate report exists
+        report = await UserReportCRUD.get_report_by_id(db, report_id)
+        if not report:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Report not found"
+            )
+
+        # Validate status
+        valid_statuses = ["reviewed", "resolved", "dismissed"]
+        if status not in valid_statuses:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid status. Must be one of: {', '.join(valid_statuses)}"
+            )
+
+        return await UserReportCRUD.update_report_status(db, report_id, status, reviewed_by)

@@ -148,102 +148,86 @@ class CloseFriendActionResponse(BaseModel):
     outgoing_count: int
 
 
-class CloseFriendsResponse(BaseModel):
-    """Response schema for close friends list"""
-    close_friends: List[UserBasic]
+# Blocked Users schemas
+class BlockedUserBase(BaseModel):
+    """Base blocked user schema"""
+    reason: Optional[str] = None
+
+
+class BlockedUserCreate(BlockedUserBase):
+    """Schema for blocking a user"""
+    pass
+
+
+class BlockedUserRead(BlockedUserBase):
+    """Schema for reading blocked users"""
+    id: int
+    blocker_id: int
+    blocked_id: int
+    blocked: UserBasic
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# User Report schemas
+class UserReportBase(BaseModel):
+    """Base user report schema"""
+    category: str  # harassment, spam, inappropriate_content, fake_account, other
+    description: Optional[str] = None
+
+
+class UserReportCreate(UserReportBase):
+    """Schema for creating a user report"""
+    pass
+
+
+class UserReportRead(UserReportBase):
+    """Schema for reading user reports"""
+    id: int
+    reporter_id: int
+    reported_id: int
+    reporter: UserBasic
+    reported: UserBasic
+    status: str
+    created_at: datetime
+    updated_at: Optional[datetime] = None
+    reviewed_at: Optional[datetime] = None
+    reviewed_by: Optional[int] = None
+
+    class Config:
+        from_attributes = True
+
+
+class UserReportUpdate(BaseModel):
+    """Schema for updating report status"""
+    status: str  # reviewed, resolved, dismissed
+
+
+# Response schemas for blocking and reporting
+class BlockedUsersResponse(BaseModel):
+    """Response schema for blocked users list"""
+    blocked_users: List[BlockedUserRead]
     count: int
 
 
-class UserSearchResponse(BaseModel):
-    """Response schema for user search"""
-    users: List[UserBasic]
+class BlockActionResponse(BaseModel):
+    """Response schema for block actions"""
+    success: bool
+    message: str
+    blocked_user: Optional[BlockedUserRead] = None
+
+
+class ReportActionResponse(BaseModel):
+    """Response schema for report actions"""
+    success: bool
+    message: str
+    report: Optional[UserReportRead] = None
+
+
+class ReportsResponse(BaseModel):
+    """Response schema for reports list (admin)"""
+    reports: List[UserReportRead]
     count: int
-    query: str
-
-
-# Action response schemas
-class FriendActionResponse(BaseModel):
-    """Response schema for friend actions"""
-    success: bool
-    message: str
-    friendship: Optional[FriendshipRead] = None
-
-
-class FriendRequestActionResponse(BaseModel):
-    """Response schema for friend request actions"""
-    success: bool
-    message: str
-    request: Optional[FriendRequestRead] = None
-
-
-class CloseFriendActionResponse(BaseModel):
-    """Response schema for close friend actions"""
-    success: bool
-    message: str
-    close_friend: Optional[CloseFriendRead] = None
-    incoming_count: int
-    outgoing_count: int
-
-
-class CloseFriendsResponse(BaseModel):
-    """Response schema for close friends list"""
-    close_friends: List[UserBasic]
-    count: int
-
-
-class UserSearchResponse(BaseModel):
-    """Response schema for user search"""
-    users: List[UserBasic]
-    count: int
-    query: str
-
-
-# Action response schemas
-class FriendActionResponse(BaseModel):
-    """Response schema for friend actions"""
-    success: bool
-    message: str
-    friendship: Optional[FriendshipRead] = None
-
-
-class FriendRequestActionResponse(BaseModel):
-    """Response schema for friend request actions"""
-    success: bool
-    message: str
-    request: Optional[FriendRequestRead] = None
-
-
-class CloseFriendActionResponse(BaseModel):
-    """Response schema for close friend actions"""
-    success: bool
-    message: str
-    close_friend: Optional[CloseFriendRead] = None
-    incoming_count: int
-    outgoing_count: int
-
-
-class CloseFriendsResponse(BaseModel):
-    """Response schema for close friends list"""
-    close_friends: List[UserBasic]
-    count: int
-
-
-class UserSearchResponse(BaseModel):
-    """Response schema for user search"""
-    users: List[UserBasic]
-    count: int
-    query: str
-
-
-# Action response schemas
-class FriendActionResponse(BaseModel):
-    """Response schema for friend actions"""
-    success: bool
-    message: str
-    friendship: Optional[FriendshipRead] = None
-
-
-class FriendRequestActionResponse(BaseModel):
-    """Response schema for friend request actions"""
-    success: bool
-    message: str
+    status: str

@@ -336,3 +336,154 @@ async def get_user_habits(
     habits = await habits_crud.get_habits_by_user(db, user_id)
 
     return habits
+
+
+# MARK: - Blocking Endpoints
+
+@router.post("/block/{user_id}", response_model=schemas.BlockActionResponse, summary="Block User")
+async def block_user(
+    user_id: int,
+    request_data: schemas.BlockedUserCreate,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Block a user. This will remove any existing friendship and prevent future interactions.
+    """
+    blocked_user = await FriendsService.block_user(
+        db, current_user.id, user_id, request_data.reason
+    )
+
+    return schemas.BlockActionResponse(
+        success=True,
+        message="User blocked successfully",
+        blocked_user=blocked_user
+    )
+
+
+@router.delete("/block/{user_id}", response_model=schemas.BlockActionResponse, summary="Unblock User")
+async def unblock_user(
+    user_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Unblock a previously blocked user.
+    """
+    success = await FriendsService.unblock_user(db, current_user.id, user_id)
+
+    return schemas.BlockActionResponse(
+        success=success,
+        message="User unblocked successfully"
+    )
+
+
+@router.get("/blocked", response_model=schemas.BlockedUsersResponse, summary="Get Blocked Users")
+async def get_blocked_users(
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get list of users blocked by the current user.
+    """
+    blocked_users = await FriendsService.get_blocked_users(db, current_user.id)
+
+    return schemas.BlockedUsersResponse(
+        blocked_users=blocked_users,
+        count=len(blocked_users)
+    )
+
+
+# MARK: - Reporting Endpoints
+
+@router.post("/report/{user_id}", response_model=schemas.ReportActionResponse, summary="Report User")
+async def report_user(
+    user_id: int,
+    request_data: schemas.UserReportCreate,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Report a user for inappropriate behavior.
+    Categories: harassment, spam, inappropriate_content, fake_account, other
+    """
+    report = await FriendsService.report_user(
+        db, current_user.id, user_id, request_data.category, request_data.description
+    )
+
+    return schemas.ReportActionResponse(
+        success=True,
+        message="User reported successfully. Our team will review this report.",
+        report=report
+    )
+
+
+# MARK: - Admin Endpoints for Reports
+
+@router.get("/admin/reports", response_model=schemas.ReportsResponse, summary="Get Reports (Admin Only)")
+async def get_reports(
+    status: str = Query("pending", description="Report status to filter by"),
+    limit: int = Query(50, le=100, description="Maximum number of results"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get reports by status. Admin only endpoint.
+    TODO: Add proper admin role checking
+    """
+    # TODO: Add admin role validation here
+    # For now, any authenticated user can access this
+
+    reports = await FriendsService.get_reports_by_status(db, status, limit)
+
+    return schemas.ReportsResponse(
+        reports=reports,
+        count=len(reports),
+        status=status
+    )
+
+
+@router.get("/admin/reports/user/{user_id}", response_model=schemas.ReportsResponse, summary="Get User Reports (Admin Only)")
+async def get_user_reports(
+    user_id: int,
+    limit: int = Query(50, le=100, description="Maximum number of results"),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get all reports for a specific user. Admin only endpoint.
+    TODO: Add proper admin role checking
+    """
+    # TODO: Add admin role validation here
+
+    reports = await FriendsService.get_user_reports(db, user_id, limit)
+
+    return schemas.ReportsResponse(
+        reports=reports,
+        count=len(reports),
+        status="all"
+    )
+
+
+@router.patch("/admin/reports/{report_id}", response_model=schemas.ReportActionResponse, summary="Update Report Status (Admin Only)")
+async def update_report_status(
+    report_id: int,
+    request_data: schemas.UserReportUpdate,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Update the status of a report. Admin only endpoint.
+    TODO: Add proper admin role checking
+    """
+    # TODO: Add admin role validation here
+
+    report = await FriendsService.update_report_status(
+        db, report_id, request_data.status, current_user.id
+    )
+
+    return schemas.ReportActionResponse(
+        success=True,
+        message=f"Report status updated to {request_data.status}",
+        report=report
+    )

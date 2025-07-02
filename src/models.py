@@ -12,7 +12,7 @@ from .habits.models import (
     TaskEntry,
     TaskValidation
 )
-from .friends.models import Friendship, FriendRequest, CloseFriend
+from .friends.models import Friendship, FriendRequest, CloseFriend, BlockedUser, UserReport
 from .chats.models import Conversation, Message, ConversationParticipant
 from .posts.models import Post, PostComment, PostLike, PostView, PostReport
 

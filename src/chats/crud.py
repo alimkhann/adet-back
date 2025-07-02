@@ -1,11 +1,14 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Optional, Tuple
-from sqlalchemy import and_, or_, desc, func, select, update
+from sqlalchemy import and_, or_, desc, func, select, update, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload, joinedload
+import logging
 
 from .models import Conversation, Message, ConversationParticipant
 from ..friends.models import Friendship
+
+logger = logging.getLogger(__name__)
 
 
 class ConversationCRUD:
@@ -283,7 +286,9 @@ class MessageCRUD:
         delete_for_everyone: bool = False
     ) -> bool:
         """Delete message (soft delete with different behavior for delete_for_everyone)"""
-        # Get the message first
+        logger.info(f"Attempting to delete message {message_id} by user {sender_id}, delete_for_everyone={delete_for_everyone}")
+
+        # First try to get the message if the user is the sender
         query = select(Message).where(
             and_(
                 Message.id == message_id,
@@ -294,31 +299,125 @@ class MessageCRUD:
         result = await db.execute(query)
         message = result.scalar_one_or_none()
 
-        if not message:
-            return False
+        logger.info(f"First query (by sender) found message: {message is not None}")
 
-        if delete_for_everyone:
-            # Check if message is within delete time limit (30 minutes)
-            time_limit = timedelta(minutes=30)
-            if datetime.utcnow() - message.created_at.replace(tzinfo=None) > time_limit:
+        # If not found and it's a bulk delete operation, try to get any message with this ID
+        # that is already soft-deleted (either "Deleted for me" or "Message deleted")
+        if not message:
+            logger.info(f"Message not found by sender, trying fallback query for message {message_id}")
+            query = select(Message).where(Message.id == message_id)
+            result = await db.execute(query)
+            message = result.scalar_one_or_none()
+
+            if message:
+                logger.info(f"Fallback query found message with content: '{message.content}'")
+            else:
+                logger.info(f"Fallback query found no message with id {message_id}")
+
+            # Only allow deletion if the message is already soft-deleted
+            if not message or (message.content not in ["Deleted for me", "Message deleted"]):
+                logger.info(f"Rejecting deletion - message {'not found' if not message else 'content not soft-deleted: ' + message.content}")
                 return False
 
-            # Delete for everyone - actually remove the message
-            await db.execute(
-                update(Message)
-                .where(Message.id == message_id)
-                .values(
-                    content="[Message deleted]",
-                    message_type="system"
-                )
-            )
-        else:
-            # Delete for me only - mark as deleted for this user
-            # For now, we'll just return success since this would require additional schema
-            pass
+        if delete_for_everyone:
+            # If message is already deleted for everyone, remove it completely
+            if message.content == "Message deleted":
+                try:
+                    # First, clear any references to this message in conversation_participants
+                    from sqlalchemy import update
+                    from ..chats.models import ConversationParticipant
 
-        await db.commit()
-        return True
+                    # Update any conversation participants that have this as their last_read_message_id
+                    update_stmt = (
+                        update(ConversationParticipant)
+                        .where(ConversationParticipant.last_read_message_id == message_id)
+                        .values(last_read_message_id=None)
+                    )
+                    await db.execute(update_stmt)
+
+                    # Now we can safely delete the message
+                    await db.delete(message)
+                    await db.commit()
+                    return True
+                except Exception as e:
+                    await db.rollback()
+                    logger.error(f"Error deleting message {message_id}: {e}")
+                    return False
+            else:
+                # Check if message is within delete time limit (30 minutes)
+                time_limit = datetime.now(timezone.utc) - timedelta(minutes=30)
+                if message.created_at < time_limit:
+                    return False
+
+                # Soft delete for everyone
+                message.content = "Message deleted"
+                message.message_type = "system"
+
+                try:
+                    await db.commit()
+                    return True
+                except Exception as e:
+                    await db.rollback()
+                    logger.error(f"Error updating message {message_id}: {e}")
+                    return False
+        else:
+            # Delete for me logic
+            if message.content == "Deleted for me":
+                # If already deleted for me, remove completely (same as delete for everyone)
+                try:
+                    # Clear any references to this message in conversation_participants
+                    from sqlalchemy import update
+                    from ..chats.models import ConversationParticipant
+
+                    update_stmt = (
+                        update(ConversationParticipant)
+                        .where(ConversationParticipant.last_read_message_id == message_id)
+                        .values(last_read_message_id=None)
+                    )
+                    await db.execute(update_stmt)
+
+                    # Now we can safely delete the message
+                    await db.delete(message)
+                    await db.commit()
+                    return True
+                except Exception as e:
+                    await db.rollback()
+                    logger.error(f"Error deleting message {message_id}: {e}")
+                    return False
+            elif message.content == "Message deleted":
+                # If deleted for everyone, also remove completely
+                try:
+                    # Clear any references to this message in conversation_participants
+                    from sqlalchemy import update
+                    from ..chats.models import ConversationParticipant
+
+                    update_stmt = (
+                        update(ConversationParticipant)
+                        .where(ConversationParticipant.last_read_message_id == message_id)
+                        .values(last_read_message_id=None)
+                    )
+                    await db.execute(update_stmt)
+
+                    # Now we can safely delete the message
+                    await db.delete(message)
+                    await db.commit()
+                    return True
+                except Exception as e:
+                    await db.rollback()
+                    logger.error(f"Error deleting message {message_id}: {e}")
+                    return False
+            else:
+                # First time deleting for me
+                message.content = "Deleted for me"
+                message.message_type = "system"
+
+                try:
+                    await db.commit()
+                    return True
+                except Exception as e:
+                    await db.rollback()
+                    logger.error(f"Error updating message {message_id}: {e}")
+                    return False
 
 
 class ParticipantCRUD:

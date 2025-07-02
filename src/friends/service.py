@@ -149,10 +149,12 @@ class FriendsService:
                 detail="This friend request is no longer pending"
             )
 
-        # Update request status to declined
-        return await FriendRequestCRUD.update_request_status(
-            db, request_id, "declined"
-        )
+        # Delete the request instead of marking it as declined
+        await FriendRequestCRUD.delete_request(db, request_id)
+
+        # Return the friend request with declined status for response consistency
+        friend_request.status = "declined"
+        return friend_request
 
     @staticmethod
     async def cancel_friend_request(
@@ -183,10 +185,12 @@ class FriendsService:
                 detail="This friend request is no longer pending"
             )
 
-        # Update request status to cancelled
-        return await FriendRequestCRUD.update_request_status(
-            db, request_id, "cancelled"
-        )
+        # Delete the request instead of marking it as cancelled
+        await FriendRequestCRUD.delete_request(db, request_id)
+
+        # Return the friend request with cancelled status for response consistency
+        friend_request.status = "cancelled"
+        return friend_request
 
     @staticmethod
     async def remove_friend(
@@ -306,3 +310,9 @@ class FriendsService:
         )
 
         return user, friendship_status
+
+    @staticmethod
+    async def get_friends_count(db: AsyncSession, user_id: int) -> int:
+        """Get the count of friends for a user"""
+        friends = await FriendshipCRUD.get_user_friends(db, user_id)
+        return len(friends)

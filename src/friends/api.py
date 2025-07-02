@@ -284,3 +284,55 @@ async def get_friendship_status(
         "user_id": user_id,
         "friendship_status": friendship_status
     }
+
+
+@router.get("/user/{user_id}/friends-count", summary="Get User Friends Count")
+async def get_user_friends_count(
+    user_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get the number of friends for a specific user.
+    """
+    from .crud import UserSearchCRUD
+
+    # Validate user exists
+    user = await UserSearchCRUD.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    count = await FriendsService.get_friends_count(db, user_id)
+
+    return {
+        "count": count
+    }
+
+
+@router.get("/user/{user_id}/habits", summary="Get User Habits")
+async def get_user_habits(
+    user_id: int,
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db)
+):
+    """
+    Get the public habits for a specific user.
+    """
+    from ..habits import crud as habits_crud
+    from .crud import UserSearchCRUD
+
+    # Validate user exists
+    user = await UserSearchCRUD.get_user_by_id(db, user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found"
+        )
+
+    # Get user's habits (for now return all, later add privacy controls)
+    habits = await habits_crud.get_habits_by_user(db, user_id)
+
+    return habits

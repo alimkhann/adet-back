@@ -721,13 +721,38 @@ async def submit_motivation_entry(habit_id: str, entry: schemas.MotivationEntryC
     return await crud.create_motivation_entry(db, user_id, entry)
 
 @router.get("/{habit_id}/motivation/today", response_model=schemas.MotivationEntryRead)
-async def get_today_motivation_entry(habit_id: str, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
-    today = date.today()
+async def get_today_motivation_entry(
+    habit_id: str,
+    user_date: str = None,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    from datetime import date
+    if user_date:
+        try:
+            today = date.fromisoformat(user_date)
+        except Exception:
+            today = date.today()
+    else:
+        today = date.today()
     user_id = _get_user_id(current_user)
     entry = await crud.get_motivation_entry(db, user_id, habit_id, today)
     if not entry:
         raise HTTPException(status_code=404, detail="No motivation entry for today.")
     return entry
+
+@router.patch("/{habit_id}/motivation/today", response_model=schemas.MotivationEntryRead)
+async def update_today_motivation_entry(
+    habit_id: str,
+    entry: schemas.MotivationEntryCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    user_id = _get_user_id(current_user)
+    updated = await crud.update_motivation_entry(db, user_id, habit_id, entry.date, entry.level)
+    if not updated:
+        raise HTTPException(status_code=404, detail="No motivation entry for today.")
+    return updated
 
 @router.post("/{habit_id}/ability", response_model=schemas.AbilityEntryRead)
 async def submit_ability_entry(habit_id: str, entry: schemas.AbilityEntryCreate, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
@@ -739,8 +764,20 @@ async def submit_ability_entry(habit_id: str, entry: schemas.AbilityEntryCreate,
     return await crud.create_ability_entry(db, user_id, entry)
 
 @router.get("/{habit_id}/ability/today", response_model=schemas.AbilityEntryRead)
-async def get_today_ability_entry(habit_id: str, db: AsyncSession = Depends(get_async_db), current_user: UserModel = Depends(get_current_user)):
-    today = date.today()
+async def get_today_ability_entry(
+    habit_id: str,
+    user_date: str = None,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    from datetime import date
+    if user_date:
+        try:
+            today = date.fromisoformat(user_date)
+        except Exception:
+            today = date.today()
+    else:
+        today = date.today()
     user_id = _get_user_id(current_user)
     entry = await crud.get_ability_entry(db, user_id, habit_id, today)
     if not entry:

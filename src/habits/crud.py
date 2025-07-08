@@ -303,6 +303,22 @@ async def create_motivation_entry(db: AsyncSession, user_id: str, entry):
     await db.refresh(db_entry)
     return db_entry
 
+async def update_motivation_entry(db: AsyncSession, user_id: str, habit_id: str, date, level: str):
+    result = await db.execute(
+        select(MotivationEntry).filter(
+            MotivationEntry.user_id == user_id,
+            MotivationEntry.habit_id == _habit_id(habit_id),
+            MotivationEntry.date == date
+        )
+    )
+    entry = result.scalar_one_or_none()
+    if not entry:
+        return None
+    entry.level = level
+    await db.commit()
+    await db.refresh(entry)
+    return entry
+
 async def get_ability_entry(db: AsyncSession, user_id: str, habit_id: str, date):
     result = await db.execute(
         select(AbilityEntry).filter(

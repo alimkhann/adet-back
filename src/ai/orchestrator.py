@@ -29,17 +29,13 @@ class AIOrchestrator:
     async def generate_personalized_task(
         self,
         context: TaskGenerationContext,
-        recent_performance: List[Dict[str, Any]] = None
+        recent_performance: List[Dict[str, Any]] = None,
+        streak: int = 0,
+        recent_feedback: str = ""
     ) -> AIAgentResponse:
         """
         Generate a personalized task using the full AI pipeline
-
-        Args:
-            context: Task generation context
-            recent_performance: Recent task completion history
-
-        Returns:
-            AIAgentResponse with generated task and metadata
+        Now also considers streak and recent feedback.
         """
         try:
             logger.info(f"Starting personalized task generation for habit: {context.habit_name}")
@@ -51,7 +47,9 @@ class AIOrchestrator:
                 motivation_level=context.motivation_level,
                 ability_level=context.ability_level,
                 recent_performance=recent_performance,
-                language=context.user_language
+                language=context.user_language,
+                streak=streak,
+                recent_feedback=recent_feedback
             )
 
             if not difficulty_response.success:

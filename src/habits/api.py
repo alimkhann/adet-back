@@ -5,12 +5,14 @@ from datetime import date, datetime, timedelta
 from pytz import UTC
 import logging
 import pytz
+from sqlalchemy import desc, select
 
 from src.database import get_async_db
 from src.auth.dependencies import get_current_user
 from src.auth.models import User as UserModel
 from src.ai import get_ai_orchestrator, TaskGenerationContext, AIAgentResponse
 from . import crud, schemas
+from .models import TaskEntry
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
@@ -113,6 +115,20 @@ async def generate_and_create_task(
             days=7
         )
 
+        # Get current streak from habit
+        streak = habit.streak or 0
+
+        # Get most recent feedback from latest completed TaskEntry for this habit
+        recent_feedback = ""
+        recent_task = await db.execute(
+            select(TaskEntry)
+            .filter(TaskEntry.habit_id == habit_id, TaskEntry.user_id == current_user.id, TaskEntry.status == "completed")
+            .order_by(desc(TaskEntry.assigned_date))
+        )
+        recent_task_obj = recent_task.scalars().first()
+        if recent_task_obj and recent_task_obj.proof_feedback:
+            recent_feedback = recent_task_obj.proof_feedback
+
         # Calculate due date in user's timezone if provided
         user_tz = None
         if hasattr(task_request, 'user_timezone') and task_request.user_timezone:
@@ -144,14 +160,18 @@ async def generate_and_create_task(
             recent_performance=recent_performance,
             current_time=datetime.utcnow(),
             day_of_week=datetime.utcnow().strftime("%A"),
-            user_timezone=task_request.user_timezone or "UTC"
+            user_timezone=task_request.user_timezone or "UTC",
+            streak=streak,
+            recent_feedback=recent_feedback
         )
 
-        # Generate task using AI orchestrator
+        # Generate task using AI orchestrator, now passing streak and feedback
         ai_orchestrator = get_ai_orchestrator()
         response = await ai_orchestrator.generate_personalized_task(
             context=context,
-            recent_performance=recent_performance
+            recent_performance=recent_performance,
+            streak=streak,
+            recent_feedback=recent_feedback
         )
 
         # If full AI generation fails, try quick fallback
@@ -267,6 +287,7 @@ async def submit_task_proof(
         )
 
         # Validate with AI results
+        created_post = None
         if validation_result:
             is_valid = validation_result.is_valid and validation_result.confidence >= 0.7
             await crud.validate_task_proof(
@@ -281,6 +302,30 @@ async def submit_task_proof(
             if is_valid:
                 current_streak = habit.streak or 0
                 await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=current_streak + 1)
+
+                # Auto-create private post for successful validation
+                try:
+                    from ..posts.crud import PostCRUD
+
+                    # Create private post automatically
+                    created_post = await PostCRUD.create_post(
+                        db=db,
+                        user_id=current_user.id,
+                        habit_id=task.habit_id,
+                        proof_urls=[file_url] if file_url else [],
+                        proof_type=proof_type,
+                        description=f"Completed: {task.task_description}",
+                        privacy="only_me"  # Start as private
+                    )
+
+                    await db.commit()
+                    logger.info(f"Auto-created private post {created_post.id} for successful task {task_id}")
+
+                except Exception as e:
+                    logger.error(f"Failed to auto-create post for task {task_id}: {e}")
+                    # Don't fail the whole operation if post creation fails
+                    created_post = None
+
         else:
             # Fallback validation - assume valid for now
             await crud.validate_task_proof(
@@ -291,10 +336,33 @@ async def submit_task_proof(
                 feedback="Proof submitted successfully"
             )
 
+            # Also create post for fallback validation
+            try:
+                from ..posts.crud import PostCRUD
+
+                # Create private post automatically
+                created_post = await PostCRUD.create_post(
+                    db=db,
+                    user_id=current_user.id,
+                    habit_id=task.habit_id,
+                    proof_urls=[file_url] if file_url else [],
+                    proof_type=proof_type,
+                    description=f"Completed: {task.task_description}",
+                    privacy="only_me"  # Start as private
+                )
+
+                await db.commit()
+                logger.info(f"Auto-created private post {created_post.id} for fallback validation task {task_id}")
+
+            except Exception as e:
+                logger.error(f"Failed to auto-create post for task {task_id}: {e}")
+                # Don't fail the whole operation if post creation fails
+                created_post = None
+
         # Get updated task
         updated_task = await crud.get_task_by_id(db=db, task_id=task_id, user_id=current_user.id)
 
-        return {
+        response_data = {
             "success": True,
             "task": updated_task,
             "file_url": file_url,
@@ -306,6 +374,17 @@ async def submit_task_proof(
             },
             "message": "Proof submitted and validated successfully"
         }
+
+        # Add post info if created
+        if created_post:
+            response_data["auto_created_post"] = {
+                "id": created_post.id,
+                "privacy": created_post.privacy,
+                "description": created_post.description,
+                "created_at": created_post.created_at.isoformat()
+            }
+
+        return response_data
 
     except Exception as e:
         logger.error(f"Error submitting proof: {e}")

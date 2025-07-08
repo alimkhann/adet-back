@@ -52,3 +52,9 @@ class User(Base):
 
     # Relationship with received reports (as reported user)
     received_reports = relationship("UserReport", foreign_keys="UserReport.reported_id", back_populates="reported", cascade="all, delete-orphan")
+
+    # Relationship with support requests
+    support_requests = relationship("SupportRequest", back_populates="user", cascade="all, delete-orphan", foreign_keys="SupportRequest.user_id")
+
+    # Relationship with bug reports
+    bug_reports = relationship("BugReport", back_populates="user", cascade="all, delete-orphan", foreign_keys="BugReport.user_id")

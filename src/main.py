@@ -17,6 +17,7 @@ from .habits.api import router as habits_router
 from .friends.api import router as friends_router
 from .chats.api import router as chats_router
 from .posts.api import router as posts_router
+from .support import router as support_router
 
 
 @asynccontextmanager
@@ -60,6 +61,7 @@ api_router.include_router(habits_router, prefix="/habits", tags=["Habits"])
 api_router.include_router(friends_router, prefix="/friends", tags=["Friends"])
 api_router.include_router(chats_router, prefix="/chats", tags=["Chats"])
 api_router.include_router(posts_router, tags=["Posts"])
+api_router.include_router(support_router, prefix="/support", tags=["Support"])
 
 app.include_router(api_router)
 app.include_router(webhooks_router, tags=["webhooks"])
@@ -81,3 +83,5 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
         "status": "ok",
         "database": "connected"
     }
+
+

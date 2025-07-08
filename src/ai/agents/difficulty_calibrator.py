@@ -25,21 +25,13 @@ class DifficultyCalibratorAgent:
         motivation_level: str,
         ability_level: str,
         recent_performance: List[Dict[str, Any]] = None,
-        language: str = "en"
+        language: str = "en",
+        streak: int = 0,
+        recent_feedback: str = ""
     ) -> AIAgentResponse:
         """
         Calibrate task difficulty using BJ Fogg's B=MAT methodology
-
-        Args:
-            habit_name: Name of the habit
-            base_difficulty: User's preferred difficulty (easy/medium/hard)
-            motivation_level: Current motivation (low/medium/high)
-            ability_level: Current ability (hard/medium/easy)
-            recent_performance: List of recent task completions
-            language: User's preferred language
-
-        Returns:
-            AIAgentResponse with calibrated difficulty
+        Now also considers streak and recent feedback.
         """
         try:
             logger.info(f"Calibrating difficulty for habit: {habit_name}")
@@ -51,7 +43,9 @@ class DifficultyCalibratorAgent:
                 motivation_level=motivation_level,
                 ability_level=ability_level,
                 recent_performance=recent_performance or [],
-                language=language
+                language=language,
+                streak=streak,
+                recent_feedback=recent_feedback
             )
 
             # Get system prompt for language
@@ -80,6 +74,8 @@ class DifficultyCalibratorAgent:
                     "base_difficulty": base_difficulty,
                     "motivation_level": motivation_level,
                     "ability_level": ability_level,
+                    "streak": streak,
+                    "recent_feedback": recent_feedback,
                     "timestamp": datetime.utcnow().isoformat()
                 }
             )

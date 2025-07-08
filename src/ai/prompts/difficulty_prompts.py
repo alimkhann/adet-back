@@ -22,10 +22,12 @@ def get_difficulty_prompt(
     motivation_level: str,
     ability_level: str,
     recent_performance: list,
-    language: str = "en"
+    language: str = "en",
+    streak: int = 0,
+    recent_feedback: str = ""
 ) -> str:
     """
-    Generate difficulty calibration prompt in simplified style
+    Generate difficulty calibration prompt in simplified style, now factoring in streak and feedback.
     """
 
     # Map levels to numerical values for calculation
@@ -49,15 +51,29 @@ def get_difficulty_prompt(
         elif success_rate > 0.8:
             performance_note = "High success rate - can increase slightly"
 
+    # Encourage higher challenge if user is on a streak and stats are high
+    challenge_note = ""
+    if motivation_level == "high" and ability_level == "easy" and base_difficulty == "hard":
+        challenge_note = "User is highly motivated, finds it easy, and prefers hard tasks. Increase the challenge more aggressively."
+    elif motivation_level == "high" and ability_level == "easy":
+        challenge_note = "User is highly motivated and finds it easy. Consider increasing the difficulty."
+    elif streak >= 5:
+        challenge_note = f"User is on a {streak}-day streak. It's safe to gently increase the challenge."
+
+    feedback_note = f"Recent feedback: {recent_feedback}" if recent_feedback else ""
+
     prompt = f"""
 Habit: {habit_name}
 - Motivation: {motivation_level} ({motivation_score})
 - Ability: {ability_level} ({ability_score})
 - Base: {base_difficulty} ({base_score})
 - Score: {bmat_score:.2f}
+- Streak: {streak}
 {performance_note}
+{challenge_note}
+{feedback_note}
 
-Calculate optimal difficulty (0.5-3.0). Keep it simple and achievable.
+Calculate optimal difficulty (0.5-3.0). If motivation and ability are high, and the user prefers hard tasks, don't be afraid to push the challenge. If streak is high, gently increase. Keep it achievable, but not always tiny.
 """
 
     return prompt

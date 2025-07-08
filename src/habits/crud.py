@@ -96,15 +96,17 @@ async def create_task_entry(
 async def get_today_task(
     db: AsyncSession,
     habit_id: int,
-    user_id: int
+    user_id: int,
+    for_date: date = None
 ) -> Optional[models.TaskEntry]:
     """Get today's task for a habit"""
-    today = date.today()
+    if for_date is None:
+        for_date = date.today()
     result = await db.execute(
         select(models.TaskEntry).filter(
             models.TaskEntry.habit_id == habit_id,
             models.TaskEntry.user_id == user_id,
-            models.TaskEntry.assigned_date == today
+            models.TaskEntry.assigned_date == for_date
         )
     )
     return result.scalar_one_or_none()

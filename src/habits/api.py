@@ -61,6 +61,7 @@ async def delete_habit(
 @router.get("/{habit_id}/today-task", response_model=schemas.TaskEntryRead)
 async def get_today_task(
     habit_id: int,
+    user_date: str = None,
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):
@@ -70,8 +71,15 @@ async def get_today_task(
     if not habit:
         raise HTTPException(status_code=404, detail="Habit not found")
 
-    # Get today's task
-    task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id)
+    from datetime import date
+    if user_date:
+        try:
+            today = date.fromisoformat(user_date)
+        except Exception:
+            today = date.today()
+    else:
+        today = date.today()
+    task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id, for_date=today)
     if not task:
         raise HTTPException(status_code=404, detail="No task found for today")
 

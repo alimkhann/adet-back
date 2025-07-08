@@ -107,6 +107,9 @@ class TaskEntry(Base):
     proof_validation_confidence = Column(Float)  # AI confidence score
     proof_feedback = Column(Text)  # AI feedback on proof
 
+    # Attempts left for proof submission
+    attempts_left = Column(Integer, default=5, nullable=False)
+
     # AI metadata
     ai_generation_metadata = Column(Text)  # JSON string of AI generation details
     calibration_metadata = Column(Text)  # JSON string of difficulty calibration

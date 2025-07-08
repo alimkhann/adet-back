@@ -277,15 +277,6 @@ async def submit_task_proof(
             # Continue without AI validation
             validation_result = None
 
-        # Submit proof using existing CRUD function
-        await crud.submit_task_proof(
-            db=db,
-            task_id=task_id,
-            user_id=current_user.id,
-            proof_type=proof_type,
-            proof_content=file_url or proof_content
-        )
-
         # Validate with AI results
         created_post = None
         if validation_result:
@@ -325,6 +316,14 @@ async def submit_task_proof(
                     logger.error(f"Failed to auto-create post for task {task_id}: {e}")
                     # Don't fail the whole operation if post creation fails
                     created_post = None
+            else:
+                # Decrement attempts_left if invalid
+                if task.attempts_left > 0:
+                    task.attempts_left -= 1
+                    if task.attempts_left == 0:
+                        task.status = "failed"
+                await db.commit()
+                await db.refresh(task)
 
         else:
             # Fallback validation - assume valid for now

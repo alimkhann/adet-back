@@ -85,7 +85,8 @@ async def create_task_entry(
         assigned_date=assigned_date,
         due_date=due_date,
         ai_generation_metadata=json.dumps(task_data.get("metadata", {})),
-        calibration_metadata=json.dumps(task_data.get("calibration_metadata", {}))
+        calibration_metadata=json.dumps(task_data.get("calibration_metadata", {})),
+        attempts_left=3  # Set default attempts
     )
 
     db.add(db_task)

@@ -64,6 +64,7 @@ class TaskEntryRead(TaskEntryBase):
     calibration_metadata: Optional[str] = None
     created_at: datetime
     updated_at: Optional[datetime] = None
+    attempts_left: int
 
     class Config:
         from_attributes = True

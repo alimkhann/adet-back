@@ -19,7 +19,6 @@ async def get_habit(db: AsyncSession, habit_id: int, user_id: int):
     return result.scalar_one_or_none()
 
 async def create_user_habit(db: AsyncSession, habit_data: schemas.HabitCreate, user_id: int):
-    # Use the provided habit_data, which should already contain all required fields
     db_habit = models.Habit(
         name=habit_data.name,
         description=habit_data.description,
@@ -27,9 +26,9 @@ async def create_user_habit(db: AsyncSession, habit_data: schemas.HabitCreate, u
         validation_time=habit_data.validation_time,
         difficulty=habit_data.difficulty,
         proof_style=habit_data.proof_style,
-        user_id=user_id
+        user_id=user_id,
+        streak_freezers=getattr(habit_data, 'streak_freezers', 0)
     )
-
     db.add(db_habit)
     await db.commit()
     await db.refresh(db_habit)
@@ -343,15 +342,42 @@ async def update_habit_streak(
     habit_id: int,
     streak_count: int
 ) -> models.Habit:
-    """Update habit streak count"""
     result = await db.execute(
         select(models.Habit).filter(models.Habit.id == habit_id)
     )
     habit = result.scalar_one_or_none()
-
     if habit:
+        # Award a freezer to the user at every 10 streaks
+        if streak_count > 0 and streak_count % 10 == 0:
+            await increment_streak_freezer_for_user(db, habit.user_id, 1)
         habit.streak = streak_count
         await db.commit()
         await db.refresh(habit)
-
     return habit
+
+# --- Streak Freezer Helpers (per user) ---
+async def get_streak_freezers_by_user(db: AsyncSession, user_id: int) -> int:
+    from src.auth.models import User
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    return user.streak_freezers if user else 0
+
+async def increment_streak_freezer_for_user(db: AsyncSession, user_id: int, amount: int = 1):
+    from src.auth.models import User
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user:
+        user.streak_freezers += amount
+        await db.commit()
+        await db.refresh(user)
+    return user
+
+async def decrement_streak_freezer_for_user(db: AsyncSession, user_id: int, amount: int = 1):
+    from src.auth.models import User
+    result = await db.execute(select(User).filter(User.id == user_id))
+    user = result.scalar_one_or_none()
+    if user and user.streak_freezers > 0:
+        user.streak_freezers = max(0, user.streak_freezers - amount)
+        await db.commit()
+        await db.refresh(user)
+    return user

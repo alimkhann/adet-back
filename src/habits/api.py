@@ -321,7 +321,13 @@ async def submit_task_proof(
                 if task.attempts_left > 0:
                     task.attempts_left -= 1
                     if task.attempts_left == 0:
-                        task.status = "failed"
+                        user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+                        if user_freezers > 0:
+                            await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
+                            # Do not reset streak, mark as failed but streak preserved
+                        else:
+                            task.status = "failed"
+                            await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
                 await db.commit()
                 await db.refresh(task)
 
@@ -444,7 +450,12 @@ async def mark_task_missed(
         # Update habit streak (reset to 0 for missed tasks)
         habit = await crud.get_habit(db=db, habit_id=task.habit_id, user_id=current_user.id)
         if habit:
-            await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
+            user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+            if user_freezers > 0:
+                await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
+                # Do not reset streak
+            else:
+                await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
 
         return {
             "success": True,
@@ -484,7 +495,12 @@ async def check_and_mark_expired_tasks(
                 # Reset habit streak
                 habit = await crud.get_habit(db=db, habit_id=task.habit_id, user_id=current_user.id)
                 if habit:
-                    await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
+                    user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+                    if user_freezers > 0:
+                        await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
+                        # Do not reset streak
+                    else:
+                        await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
 
                 expired_tasks.append(updated_task)
 
@@ -722,3 +738,32 @@ async def get_today_ability_entry(habit_id: str, db: AsyncSession = Depends(get_
     if not entry:
         raise HTTPException(status_code=404, detail="No ability entry for today.")
     return entry
+
+# --- Streak Freezer Endpoints (per user) ---
+@router.get("/user/streak-freezers", response_model=schemas.UserStreakFreezers)
+async def get_user_streak_freezers(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    count = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+    return {"streak_freezers": count}
+
+@router.post("/user/use-streak-freezer", response_model=schemas.UserStreakFreezers)
+async def use_user_streak_freezer(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    count = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+    if count <= 0:
+        raise HTTPException(status_code=400, detail="No streak freezers available")
+    await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
+    return {"streak_freezers": count - 1}
+
+@router.post("/user/award-streak-freezer", response_model=schemas.UserStreakFreezers)
+async def award_user_streak_freezer(
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    count = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+    await crud.increment_streak_freezer_for_user(db=db, user_id=current_user.id)
+    return {"streak_freezers": count + 1}

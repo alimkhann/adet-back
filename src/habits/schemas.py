@@ -27,8 +27,8 @@ class Habit(HabitBase):
     user_id: int
     streak: int
 
-    class Config:
-        from_attributes = True
+class UserStreakFreezers(BaseModel):
+    streak_freezers: int
 
 # --- Task Completion Schemas ---
 

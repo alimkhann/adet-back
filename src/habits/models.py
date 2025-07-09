@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, Date
+from sqlalchemy import Column, Integer, String, Text, DateTime, Boolean, Float, ForeignKey, Date, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from enum import Enum
@@ -79,6 +79,9 @@ class ProofType(str, Enum):
 class TaskEntry(Base):
     """AI-generated task entries"""
     __tablename__ = "task_entries"
+    __table_args__ = (
+        UniqueConstraint('user_id', 'habit_id', 'assigned_date', name='uq_user_habit_assigned_date'),
+    )
 
     id = Column(Integer, primary_key=True, index=True)
     habit_id = Column(Integer, ForeignKey("habits.id", ondelete="CASCADE"), nullable=False)

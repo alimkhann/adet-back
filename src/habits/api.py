@@ -1,5 +1,6 @@
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import MultipleResultsFound
 from typing import List
 from datetime import date, datetime, timedelta
 from pytz import UTC
@@ -75,11 +76,25 @@ async def get_today_task(
     if user_date:
         try:
             today = date.fromisoformat(user_date)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[API] Invalid user_date '{user_date}': {e}. Falling back to backend date.today() (UTC)")
             today = date.today()
     else:
+        logger.warning("[API] No user_date provided. Falling back to backend date.today() (UTC)")
         today = date.today()
-    task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id, for_date=today)
+    try:
+        task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id, for_date=today)
+    except MultipleResultsFound:
+        task = (await db.execute(
+            select(TaskEntry)
+            .filter(
+                TaskEntry.habit_id == habit_id,
+                TaskEntry.user_id == current_user.id,
+                TaskEntry.assigned_date == today
+            )
+            .order_by(desc(TaskEntry.created_at))
+            .limit(1)
+        )).scalars().first()
     if not task:
         raise HTTPException(status_code=404, detail="No task found for today")
 
@@ -102,122 +117,77 @@ async def generate_and_create_task(
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    print("[DEBUG] /generate-and-create-task called")
-    """Generate AI task and create it in the database"""
+    logger.info(f"[TaskGen] Called for habit_id={habit_id}, user_id={current_user.id}")
+    logger.info(f"[TaskGen] Full request body: {task_request}")
+
+    import asyncio
+    from datetime import datetime
+
     try:
+        start_time = datetime.utcnow()
+
+        # --- Use user_date for all 'today' logic ---
+        from datetime import date
+        user_date = None
+        if hasattr(task_request, 'user_date') and task_request.user_date:
+            try:
+                user_date = date.fromisoformat(task_request.user_date)
+                logger.info(f"[TaskGen] Using user_date: {user_date}")
+            except Exception as e:
+                logger.warning(f"[TaskGen] Invalid user_date '{task_request.user_date}': {e}. Falling back to backend date.today() (UTC)")
+                user_date = date.today()
+        else:
+            logger.warning("[TaskGen] No user_date provided. Falling back to backend date.today() (UTC)")
+            user_date = date.today()
+
         # Get habit details
+        logger.info(f"[TaskGen] Fetching habit {habit_id} for user {current_user.id}")
         habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
         if not habit:
+            logger.error(f"[TaskGen] Habit {habit_id} not found for user {current_user.id}")
             raise HTTPException(status_code=404, detail="Habit not found")
 
         # Check if task already exists for today
-        existing_task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id)
+        logger.info(f"[TaskGen] Checking for existing task on {user_date}")
+        existing_task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id, for_date=user_date)
         if existing_task:
+            logger.info(f"[TaskGen] Task already exists for user_date {user_date} for habit {habit_id}")
             raise HTTPException(status_code=400, detail="Task already exists for today")
 
-        # Get recent performance for context
-        recent_performance = await crud.get_recent_performance(
-            db=db,
-            user_id=current_user.id,
-            habit_id=habit_id,
-            days=7
-        )
-
-        # Get current streak from habit
-        streak = habit.streak or 0
-
-        # Get most recent feedback from latest completed TaskEntry for this habit
-        recent_feedback = ""
-        recent_task = await db.execute(
-            select(TaskEntry)
-            .filter(TaskEntry.habit_id == habit_id, TaskEntry.user_id == current_user.id, TaskEntry.status == "completed")
-            .order_by(desc(TaskEntry.assigned_date))
-        )
-        recent_task_obj = recent_task.scalars().first()
-        if recent_task_obj and recent_task_obj.proof_feedback:
-            recent_feedback = recent_task_obj.proof_feedback
-
-        # Calculate due date in user's timezone if provided
-        user_tz = None
-        if hasattr(task_request, 'user_timezone') and task_request.user_timezone:
-            try:
-                user_tz = pytz.timezone(task_request.user_timezone)
-            except Exception:
-                user_tz = pytz.timezone('UTC')
-        else:
-            user_tz = pytz.timezone('UTC')
-
-        now_local = datetime.now(user_tz)
-        due_date_local = now_local + timedelta(hours=4)
-        due_date_utc = due_date_local.astimezone(pytz.utc)
-
-        logger.info(f"[TaskGen] user_timezone: {user_tz}")
-        logger.info(f"[TaskGen] now_local: {now_local.isoformat()}")
-        logger.info(f"[TaskGen] due_date_local: {due_date_local.isoformat()}")
-        logger.info(f"[TaskGen] due_date_utc: {due_date_utc.isoformat()}")
-
-        # Create task generation context
-        context = TaskGenerationContext(
-            habit_name=habit.name,
-            habit_description=habit.description or "",
-            base_difficulty=task_request.base_difficulty,
-            motivation_level=task_request.motivation_level,
-            ability_level=task_request.ability_level,
-            proof_style=task_request.proof_style,
-            user_language=task_request.user_language or "en",
-            recent_performance=recent_performance,
-            current_time=datetime.utcnow(),
-            day_of_week=datetime.utcnow().strftime("%A"),
-            user_timezone=task_request.user_timezone or "UTC",
-            streak=streak,
-            recent_feedback=recent_feedback
-        )
-
-        # Generate task using AI orchestrator, now passing streak and feedback
-        ai_orchestrator = get_ai_orchestrator()
-        response = await ai_orchestrator.generate_personalized_task(
-            context=context,
-            recent_performance=recent_performance,
-            streak=streak,
-            recent_feedback=recent_feedback
-        )
-
-        # If full AI generation fails, try quick fallback
-        if not response.success:
-            logger.warning(f"Full AI generation failed: {response.error}. Trying quick fallback...")
-            response = await ai_orchestrator.generate_quick_task(
-                habit_name=habit.name,
-                base_difficulty=habit.difficulty,
-                proof_style=habit.proof_style,
-                language="en"
+        # Generate task with timeout
+        logger.info(f"[TaskGen] Starting AI task generation (timeout: 45s)")
+        try:
+            task_entry = await asyncio.wait_for(
+                crud.generate_and_create_task(
+                    db=db,
+                    habit=habit,
+                    user_id=current_user.id,
+                    task_request=task_request,
+                    assigned_date=user_date
+                ),
+                timeout=45.0  # 45 second timeout
             )
 
-        if not response.success:
-            raise HTTPException(status_code=500, detail=f"Failed to generate task: {response.error}")
+            generation_time = (datetime.utcnow() - start_time).total_seconds()
+            logger.info(f"[TaskGen] Task generated successfully in {generation_time:.2f}s")
+            return {"success": True, "message": "Task generated and created successfully", "task_id": task_entry.id}
 
-        # Create task entry in database
-        task_entry = await crud.create_task_entry(
-            db=db,
-            habit_id=habit_id,
-            user_id=current_user.id,
-            task_data=response.data,
-            assigned_date=date.today(),
-            due_date=due_date_utc.replace(tzinfo=None)  # store as naive UTC
-        )
+        except asyncio.TimeoutError:
+            logger.error(f"[TaskGen] Task generation timed out after 45 seconds")
+            raise HTTPException(
+                status_code=408,
+                content={"success": False, "detail": "Task generation timed out. Please try again in a moment."}
+            )
 
-        # Commit and refresh the entry
-        await db.commit()
-        await db.refresh(task_entry)
-
-        # Return task creation response format
-        return {
-            "success": True,
-            "task": task_entry,
-            "ai_metadata": response.metadata
-        }
-
+    except HTTPException:
+        # Re-raise HTTP exceptions as-is (don't wrap in 500)
+        raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to generate and create task: {str(e)}")
+        import traceback
+        logger.error(f"[TaskGen] Exception: {e}")
+        tb = traceback.format_exc()
+        logger.error(tb)
+        raise HTTPException(status_code=500, content={"success": False, "detail": f"Failed to generate and create task: {str(e)}"})
 
 @router.post("/tasks/{task_id}/submit-proof")
 async def submit_task_proof(
@@ -544,7 +514,8 @@ async def generate_ai_task(
             db=db,
             user_id=current_user.id,
             habit_id=habit_id,
-            days=7
+            days=7,
+            reference_date=task_request.user_date if task_request.user_date else date.today()
         )
 
         # Create task generation context
@@ -638,7 +609,8 @@ async def analyze_performance(
             db=db,
             user_id=current_user.id,
             habit_id=habit_id,
-            days=30
+            days=30,
+            reference_date=date.today()
         )
 
         # Analyze performance
@@ -681,7 +653,8 @@ async def get_improvement_suggestions(
             db=db,
             user_id=current_user.id,
             habit_id=habit_id,
-            days=30
+            days=30,
+            reference_date=date.today()
         )
 
         # Generate suggestions
@@ -731,9 +704,11 @@ async def get_today_motivation_entry(
     if user_date:
         try:
             today = date.fromisoformat(user_date)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[API] Invalid user_date '{user_date}': {e}. Falling back to backend date.today() (UTC)")
             today = date.today()
     else:
+        logger.warning("[API] No user_date provided. Falling back to backend date.today() (UTC)")
         today = date.today()
     user_id = _get_user_id(current_user)
     entry = await crud.get_motivation_entry(db, user_id, habit_id, today)
@@ -774,9 +749,11 @@ async def get_today_ability_entry(
     if user_date:
         try:
             today = date.fromisoformat(user_date)
-        except Exception:
+        except Exception as e:
+            logger.warning(f"[API] Invalid user_date '{user_date}': {e}. Falling back to backend date.today() (UTC)")
             today = date.today()
     else:
+        logger.warning("[API] No user_date provided. Falling back to backend date.today() (UTC)")
         today = date.today()
     user_id = _get_user_id(current_user)
     entry = await crud.get_ability_entry(db, user_id, habit_id, today)

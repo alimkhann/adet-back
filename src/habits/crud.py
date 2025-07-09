@@ -1,5 +1,6 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, desc
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional
 import json
@@ -89,7 +90,12 @@ async def create_task_entry(
     )
 
     db.add(db_task)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        return await get_today_task(db, habit_id, user_id, assigned_date)
+
     await db.refresh(db_task)
     return db_task
 
@@ -99,17 +105,21 @@ async def get_today_task(
     user_id: int,
     for_date: date = None
 ) -> Optional[models.TaskEntry]:
-    """Get today's task for a habit"""
+    print(f"DEBUG get_today_task: habit_id={habit_id} ({type(habit_id)}), user_id={user_id} ({type(user_id)}), for_date={for_date} ({type(for_date)})")
     if for_date is None:
         for_date = date.today()
-    result = await db.execute(
-        select(models.TaskEntry).filter(
+    stmt = (
+        select(models.TaskEntry)
+        .filter(
             models.TaskEntry.habit_id == habit_id,
             models.TaskEntry.user_id == user_id,
             models.TaskEntry.assigned_date == for_date
         )
+        .order_by(desc(models.TaskEntry.created_at))
+        .limit(1)
     )
-    return result.scalar_one_or_none()
+    result = await db.execute(stmt)
+    return result.scalars().first()
 
 async def get_pending_tasks(
     db: AsyncSession,
@@ -215,10 +225,14 @@ async def get_recent_performance(
     db: AsyncSession,
     user_id: int,
     habit_id: int,
-    days: int = 7
+    days: int = 7,
+    reference_date: date = None
 ) -> List[Dict[str, Any]]:
     """Get recent performance data for AI context"""
-    start_date = date.today() - timedelta(days=days)
+    if reference_date is None:
+        from datetime import date
+        reference_date = date.today()
+    start_date = reference_date - timedelta(days=days)
 
     result = await db.execute(
         select(models.TaskEntry).filter(
@@ -245,10 +259,14 @@ async def get_performance_history(
     db: AsyncSession,
     user_id: int,
     habit_id: int,
-    days: int = 30
+    days: int = 30,
+    reference_date: date = None
 ) -> List[Dict[str, Any]]:
     """Get performance history for analysis"""
-    start_date = date.today() - timedelta(days=days)
+    if reference_date is None:
+        from datetime import date
+        reference_date = date.today()
+    start_date = reference_date - timedelta(days=days)
 
     result = await db.execute(
         select(models.TaskEntry).filter(
@@ -399,3 +417,107 @@ async def decrement_streak_freezer_for_user(db: AsyncSession, user_id: int, amou
         await db.commit()
         await db.refresh(user)
     return user
+
+async def generate_and_create_task(
+    db: AsyncSession,
+    habit,
+    user_id: int,
+    task_request,
+    assigned_date: date
+):
+    """Generate and create a task entry using AI orchestrator"""
+    from ..ai.orchestrator import get_ai_orchestrator
+    from ..ai.schemas import TaskGenerationContext
+    from datetime import datetime, timedelta
+    import pytz
+
+    # Get recent performance for context
+    recent_performance = await get_recent_performance(
+        db=db,
+        user_id=user_id,
+        habit_id=habit.id,
+        days=7,
+        reference_date=assigned_date
+    )
+
+    # Get current streak from habit
+    streak = habit.streak or 0
+
+    # Get most recent feedback from latest completed TaskEntry for this habit
+    recent_feedback = ""
+    recent_task = await db.execute(
+        select(models.TaskEntry)
+        .filter(models.TaskEntry.habit_id == habit.id, models.TaskEntry.user_id == user_id, models.TaskEntry.status == "completed")
+        .order_by(desc(models.TaskEntry.assigned_date))
+    )
+    recent_task_obj = recent_task.scalars().first()
+    if recent_task_obj and recent_task_obj.proof_feedback:
+        recent_feedback = recent_task_obj.proof_feedback
+
+    # Calculate due date in user's timezone if provided
+    user_tz = None
+    if hasattr(task_request, 'user_timezone') and task_request.user_timezone:
+        try:
+            user_tz = pytz.timezone(task_request.user_timezone)
+        except Exception:
+            user_tz = pytz.timezone('UTC')
+    else:
+        user_tz = pytz.timezone('UTC')
+
+    now_local = datetime.now(user_tz)
+    due_date_local = now_local + timedelta(hours=4)
+    due_date_utc = due_date_local.astimezone(pytz.utc)
+
+    # Create task generation context
+    context = TaskGenerationContext(
+        habit_name=habit.name,
+        habit_description=habit.description or "",
+        base_difficulty=task_request.base_difficulty,
+        motivation_level=task_request.motivation_level,
+        ability_level=task_request.ability_level,
+        proof_style=task_request.proof_style,
+        user_language=task_request.user_language or "en",
+        recent_performance=recent_performance,
+        current_time=now_local,
+        day_of_week=now_local.strftime("%A"),
+        user_timezone=task_request.user_timezone or "UTC",
+        streak=streak,
+        recent_feedback=recent_feedback
+    )
+
+    # Generate task using AI orchestrator
+    ai_orchestrator = get_ai_orchestrator()
+    response = await ai_orchestrator.generate_personalized_task(
+        context=context,
+        recent_performance=recent_performance,
+        streak=streak,
+        recent_feedback=recent_feedback
+    )
+
+    # If full AI generation fails, try quick fallback
+    if not response.success:
+        response = await ai_orchestrator.generate_quick_task(
+            habit_name=habit.name,
+            base_difficulty=habit.difficulty,
+            proof_style=habit.proof_style,
+            language="en"
+        )
+
+    if not response.success:
+        raise Exception(f"Failed to generate task: {response.error}")
+
+    # Create task entry in database
+    task_entry = await create_task_entry(
+        db=db,
+        habit_id=habit.id,
+        user_id=user_id,
+        task_data=response.data,
+        assigned_date=assigned_date,
+        due_date=due_date_utc.replace(tzinfo=None)  # store as naive UTC
+    )
+
+    # Commit and refresh the entry
+    await db.commit()
+    await db.refresh(task_entry)
+
+    return task_entry

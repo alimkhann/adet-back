@@ -92,6 +92,7 @@ class AITaskRequest(BaseModel):
     proof_style: Literal["photo", "video", "audio", "text"] = Field(..., description="Preferred proof style")
     user_language: Optional[str] = Field("en", description="User's preferred language")
     user_timezone: Optional[str] = Field("UTC", description="User's timezone")
+    user_date: Optional[str] = Field(None, description="User's local date in YYYY-MM-DD format")
 
 class QuickTaskRequest(BaseModel):
     """Request schema for quick task generation (fallback)"""

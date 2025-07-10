@@ -267,16 +267,20 @@ async def submit_task_proof(
                 feedback=validation_result.feedback
             )
 
-            # Update habit streak if task completed successfully
+            # --- ENFORCE: Always set to completed if valid and confident ---
             if is_valid:
-                current_streak = habit.streak or 0
-                await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=current_streak + 1)
+                # Update task status to completed
+                task.status = "completed"
+                task.completed_at = datetime.utcnow()
+                await db.commit()
+                await db.refresh(task)
+                # Do NOT increment habit streak here. Streak is only updated on share.
+                # current_streak = habit.streak or 0
+                # await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=current_streak + 1)
 
                 # Auto-create private post for successful validation
                 try:
                     from ..posts.crud import PostCRUD
-
-                    # Create private post automatically
                     created_post = await PostCRUD.create_post(
                         db=db,
                         user_id=current_user.id,
@@ -284,15 +288,12 @@ async def submit_task_proof(
                         proof_urls=[file_url] if file_url else [],
                         proof_type=proof_type,
                         description=f"Completed: {task.task_description}",
-                        privacy="only_me"  # Start as private
+                        privacy="only_me"
                     )
-
                     await db.commit()
                     logger.info(f"Auto-created private post {created_post.id} for successful task {task_id}")
-
                 except Exception as e:
                     logger.error(f"Failed to auto-create post for task {task_id}: {e}")
-                    # Don't fail the whole operation if post creation fails
                     created_post = None
             else:
                 # Decrement attempts_left if invalid
@@ -302,13 +303,11 @@ async def submit_task_proof(
                         user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
                         if user_freezers > 0:
                             await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
-                            # Do not reset streak, mark as failed but streak preserved
                         else:
                             task.status = "failed"
                             await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
                 await db.commit()
                 await db.refresh(task)
-
         else:
             # Fallback validation - assume valid for now
             await crud.validate_task_proof(
@@ -318,12 +317,13 @@ async def submit_task_proof(
                 confidence=0.8,
                 feedback="Proof submitted successfully"
             )
-
-            # Also create post for fallback validation
+            # --- ENFORCE: Always set to completed in fallback ---
+            task.status = "completed"
+            task.completed_at = datetime.utcnow()
+            await db.commit()
+            await db.refresh(task)
             try:
                 from ..posts.crud import PostCRUD
-
-                # Create private post automatically
                 created_post = await PostCRUD.create_post(
                     db=db,
                     user_id=current_user.id,
@@ -331,15 +331,12 @@ async def submit_task_proof(
                     proof_urls=[file_url] if file_url else [],
                     proof_type=proof_type,
                     description=f"Completed: {task.task_description}",
-                    privacy="only_me"  # Start as private
+                    privacy="only_me"
                 )
-
                 await db.commit()
                 logger.info(f"Auto-created private post {created_post.id} for fallback validation task {task_id}")
-
             except Exception as e:
                 logger.error(f"Failed to auto-create post for task {task_id}: {e}")
-                # Don't fail the whole operation if post creation fails
                 created_post = None
 
         # Get updated task

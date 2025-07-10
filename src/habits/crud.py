@@ -27,8 +27,7 @@ async def create_user_habit(db: AsyncSession, habit_data: schemas.HabitCreate, u
         validation_time=habit_data.validation_time,
         difficulty=habit_data.difficulty,
         proof_style=habit_data.proof_style,
-        user_id=user_id,
-        streak_freezers=getattr(habit_data, 'streak_freezers', 0)
+        user_id=user_id
     )
     db.add(db_habit)
     await db.commit()

@@ -1,11 +1,19 @@
 import logging
+import asyncio
 from typing import Optional, Dict, Any
 from datetime import datetime
 
 from ..gemini_client import get_gemini_client
 from ..schemas import TaskValidationResult
 
-logger = logging.getLogger(__name__)
+# Robust logger config for ProofValidator
+logger = logging.getLogger("proof_validator")
+if not logger.hasHandlers():
+    handler = logging.StreamHandler()
+    formatter = logging.Formatter('[%(levelname)s] %(asctime)s %(name)s: %(message)s')
+    handler.setFormatter(formatter)
+    logger.addHandler(handler)
+logger.setLevel(logging.INFO)
 
 class ProofValidatorAgent:
     """
@@ -28,23 +36,84 @@ class ProofValidatorAgent:
     ) -> TaskValidationResult:
         """
         Validate proof submission against task requirements
-
-        Args:
-            task_description: The task that was supposed to be completed
-            proof_requirements: What proof was required
-            proof_type: Type of proof (photo, video, audio, text)
-            proof_content: Text content or description of proof
-            user_name: Name of the user (for personalization)
-            habit_name: Name of the habit (for context)
-            proof_file_data: Binary data of uploaded file (if any)
-
-        Returns:
-            TaskValidationResult with validation outcome
         """
+        import json
         try:
             logger.info(f"Validating {proof_type} proof for task: {task_description[:50]}...")
+            # --- Use Gemini Vision for photo proofs ---
+            if proof_type == "photo" and proof_file_data:
+                import time
+                # --- Describe the image before validation ---
+                describe_prompt = (
+                    "Describe this image in detail. Be literal and objective. "
+                    "Do not make up content."
+                )
+                logger.info(f"[ProofValidator] Starting Gemini Vision image description...")
+                start_time = time.time()
+                loop = asyncio.get_event_loop()
+                try:
+                    image_description = await asyncio.wait_for(
+                        loop.run_in_executor(None, self.gemini_client.analyze_image, proof_file_data, describe_prompt),
+                        timeout=20.0
+                    )
+                    elapsed = time.time() - start_time
+                    logger.info(f"[ProofValidator] Image description: {image_description}\nPrompt: {describe_prompt}\nTime: {elapsed:.2f}s")
+                except asyncio.TimeoutError:
+                    logger.warning("[ProofValidator] Gemini Vision image description timed out after 20s!")
+                    return TaskValidationResult(
+                        is_valid=False,
+                        confidence=0.0,
+                        feedback="AI image analysis timed out. Please try again or use a different image."
+                    )
 
-            # Create validation prompt
+                # --- Now run the actual validation prompt ---
+                prompt = (
+                    f"You are an AI proof validator. Analyze the following image and requirements. "
+                    f"Respond ONLY with a JSON object in the following format:\n"
+                    f"{{\n  \"is_valid\": true/false,\n  \"confidence\": float (0.0-1.0),\n  \"feedback\": \"string\"\n}}\n"
+                    f"Requirements: {proof_requirements}\n"
+                    f"Task: {task_description}\n"
+                )
+                logger.info(f"[ProofValidator] Starting Gemini Vision validation...")
+                try:
+                    response_text = await asyncio.wait_for(
+                        loop.run_in_executor(None, self.gemini_client.analyze_image, proof_file_data, prompt),
+                        timeout=20.0
+                    )
+                    logger.info(f"[ProofValidator] Gemini Vision validation response: {response_text}")
+                except asyncio.TimeoutError:
+                    logger.warning("[ProofValidator] Gemini Vision validation timed out after 20s!")
+                    return TaskValidationResult(
+                        is_valid=False,
+                        confidence=0.0,
+                        feedback="AI validation timed out. Please try again or use a different image."
+                    )
+                try:
+                    # Strip markdown code fences if present
+                    cleaned_response = response_text.strip()
+                    if cleaned_response.startswith("```json"):
+                        cleaned_response = cleaned_response.replace("```json", "").replace("```", "").strip()
+                    elif cleaned_response.startswith("```"):
+                        cleaned_response = cleaned_response.replace("```", "").strip()
+
+                    result = json.loads(cleaned_response)
+                    is_valid = bool(result.get("is_valid", False))
+                    confidence = float(result.get("confidence", 0.0))
+                    feedback = str(result.get("feedback", "No feedback provided."))
+                    logger.info(f"[ProofValidator] Parsed validation result: valid={is_valid}, confidence={confidence}")
+                    return TaskValidationResult(
+                        is_valid=is_valid,
+                        confidence=confidence,
+                        feedback=feedback
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to parse Gemini Vision response: {e}\nRaw response: {response_text}")
+                    return TaskValidationResult(
+                        is_valid=False,
+                        confidence=0.0,
+                        feedback="Unable to validate proof image due to technical error."
+                    )
+            # --- Fallback: text-only validation ---
             prompt = self._create_validation_prompt(
                 task_description=task_description,
                 proof_requirements=proof_requirements,
@@ -54,26 +123,21 @@ class ProofValidatorAgent:
                 habit_name=habit_name
             )
 
-            # Generate validation using structured response
             response = await self.gemini_client.generate_structured_response(
                 prompt=prompt,
                 response_schema=TaskValidationResult,
                 temperature=0.3,  # Lower temperature for consistent validation
                 system_prompt=self._get_validation_system_prompt()
             )
-
-            logger.info(f"Proof validation completed: {'Valid' if response.is_valid else 'Invalid'} (confidence: {response.confidence:.2f})")
-
+            logger.info(f"Proof validation (text) completed: {'Valid' if response.is_valid else 'Invalid'} (confidence: {response.confidence:.2f})")
             return response
 
         except Exception as e:
-            logger.error(f"Error validating proof: {str(e)}")
-            # Return a fallback validation result
+            logger.error(f"Error validating proof: {e}")
             return TaskValidationResult(
                 is_valid=False,
                 confidence=0.0,
-                feedback=f"Unable to validate proof due to technical error: {str(e)}",
-                suggestions=["Please try submitting your proof again", "Contact support if the issue persists"]
+                feedback=f"Unable to validate proof due to technical error: {e}"
             )
 
     def _create_validation_prompt(

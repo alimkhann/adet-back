@@ -109,14 +109,11 @@ async def submit_task_proof(
             task.proof_validation_confidence = validation_result.confidence
             task.proof_feedback = validation_result.feedback
 
-            # Update task status based on validation
+            # --- ENFORCE: Always set to completed if valid and confident ---
             if validation_result.is_valid and validation_result.confidence >= 0.7:
                 task.status = "completed"
                 task.completed_at = datetime.now()
-
-                # Update habit streak
-                habit.streak += 1
-
+                # Do NOT increment habit streak here. Streak is only updated on share.
             else:
                 task.status = "failed"
         else:
@@ -125,6 +122,10 @@ async def submit_task_proof(
             task.proof_validation_confidence = 0.5
             task.proof_feedback = "Proof submitted. AI validation temporarily unavailable - manual review required."
             task.status = "pending_review"  # Don't auto-complete without validation
+
+        # --- ENFORCE: Commit after status update ---
+        db.commit()
+        db.refresh(task)
 
         # Create validation record
         if validation_result:

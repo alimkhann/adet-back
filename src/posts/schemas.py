@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, date
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field, validator
 from enum import Enum
@@ -25,10 +25,20 @@ class PostPrivacyEnum(str, Enum):
 class PostBase(BaseModel):
     """Base post schema"""
     habit_id: Optional[int] = None
-    proof_urls: List[str] = Field(..., min_items=1, max_items=5)
+    proof_urls: Optional[List[str]] = None
     proof_type: ProofTypeEnum
     description: Optional[str] = Field(None, max_length=280)
     privacy: PostPrivacyEnum = PostPrivacyEnum.FRIENDS
+    assigned_date: Optional[date] = None
+
+    @validator('proof_urls', always=True)
+    def validate_proof_urls(cls, v, values):
+        proof_type = values.get('proof_type')
+        if proof_type in ['image', 'video', 'audio']:
+            if not v or len(v) == 0:
+                raise ValueError('proof_urls must have at least 1 item for image/video/audio')
+        # For text, allow empty
+        return v or []
 
     @validator('description')
     def validate_description(cls, v):
@@ -39,6 +49,7 @@ class PostBase(BaseModel):
 
 class PostCreate(PostBase):
     """Schema for creating posts"""
+    assigned_date: Optional[date] = None
     pass
 
 
@@ -60,6 +71,7 @@ class PostRead(PostBase):
     user_id: int
     created_at: datetime
     updated_at: Optional[datetime] = None
+    assigned_date: date
 
     # Habit streak at time of post creation
     habit_streak: Optional[int] = None
@@ -252,3 +264,7 @@ class BatchViewResponse(BaseModel):
     message: str
     processed_count: int
     failed_count: int = 0
+
+
+class PostResponse(BaseModel):
+    post: PostRead

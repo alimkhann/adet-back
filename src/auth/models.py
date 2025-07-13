@@ -18,6 +18,7 @@ class User(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), onupdate=func.now())
     streak_freezers = Column(Integer, default=2, nullable=False)
+    plan = Column(String, default="free", nullable=False)  # 'free' or 'paid'
 
     # Relationship with onboarding answers
     onboarding_answer = relationship(

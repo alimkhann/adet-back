@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, date
 from typing import List, Optional, Tuple
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, and_, or_, func, desc, case, text
@@ -25,9 +25,24 @@ class PostCRUD:
         proof_type: str,
         description: Optional[str],
         privacy: str,
-        habit_streak: Optional[int] = None
+        habit_streak: Optional[int] = None,
+        assigned_date: date = None
     ) -> Post:
-        """Create a new post"""
+        """Create a new post, or return existing if already present for user/habit/day"""
+        if assigned_date is None:
+            raise ValueError("assigned_date must be provided when creating a post")
+        # Check for existing post
+        result = await db.execute(
+            select(Post)
+            .where(
+                Post.user_id == user_id,
+                Post.habit_id == habit_id,
+                Post.assigned_date == assigned_date
+            )
+        )
+        existing_post = result.scalars().first()
+        if existing_post:
+            return existing_post
         post = Post(
             user_id=user_id,
             habit_id=habit_id,
@@ -35,14 +50,13 @@ class PostCRUD:
             proof_type=proof_type,
             description=description,
             privacy=privacy,
-            habit_streak=habit_streak
+            habit_streak=habit_streak,
+            assigned_date=assigned_date
         )
-
         db.add(post)
         await db.commit()
         await db.refresh(post)
-
-        logger.info(f"Created post {post.id} for user {user_id} with streak {habit_streak}")
+        logger.info(f"Created post {post.id} for user {user_id} with streak {habit_streak} on {assigned_date}")
         return post
 
     @staticmethod

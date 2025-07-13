@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, ForeignKey, UniqueConstraint, Index, JSON
+from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text, ForeignKey, UniqueConstraint, Index, JSON, Date
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from enum import Enum as PyEnum
@@ -42,6 +42,9 @@ class Post(Base):
     # Habit streak at time of post creation
     habit_streak = Column(Integer, nullable=True)
 
+    # Assigned Date
+    assigned_date = Column(Date, nullable=True, index=True)
+
     # Analytics
     views_count = Column(Integer, nullable=False, default=0)
     likes_count = Column(Integer, nullable=False, default=0)
@@ -60,6 +63,7 @@ class Post(Base):
 
     # Constraints and Indexes
     __table_args__ = (
+        UniqueConstraint('user_id', 'habit_id', 'assigned_date', name='unique_user_habit_day_post'),
         Index('idx_post_user_created', 'user_id', 'created_at'),
         Index('idx_post_privacy', 'privacy'),
         Index('idx_post_created_at', 'created_at'),

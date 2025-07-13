@@ -43,50 +43,37 @@ class ProofValidatorAgent:
             # --- Use Gemini Vision for photo proofs ---
             if proof_type == "photo" and proof_file_data:
                 import time
-                # --- Describe the image before validation ---
-                describe_prompt = (
-                    "Describe this image in detail. Be literal and objective. "
-                    "Do not make up content."
-                )
-                logger.info(f"[ProofValidator] Starting Gemini Vision image description...")
-                start_time = time.time()
-                loop = asyncio.get_event_loop()
-                try:
-                    image_description = await asyncio.wait_for(
-                        loop.run_in_executor(None, self.gemini_client.analyze_image, proof_file_data, describe_prompt),
-                        timeout=20.0
-                    )
-                    elapsed = time.time() - start_time
-                    logger.info(f"[ProofValidator] Image description: {image_description}\nPrompt: {describe_prompt}\nTime: {elapsed:.2f}s")
-                except asyncio.TimeoutError:
-                    logger.warning("[ProofValidator] Gemini Vision image description timed out after 20s!")
-                    return TaskValidationResult(
-                        is_valid=False,
-                        confidence=0.0,
-                        feedback="AI image analysis timed out. Please try again or use a different image."
-                    )
-
-                # --- Now run the actual validation prompt ---
+                # --- Concise, safe prompt for validation ---
                 prompt = (
-                    f"You are an AI proof validator. Analyze the following image and requirements. "
-                    f"Respond ONLY with a JSON object in the following format:\n"
-                    f"{{\n  \"is_valid\": true/false,\n  \"confidence\": float (0.0-1.0),\n  \"feedback\": \"string\"\n}}\n"
-                    f"Requirements: {proof_requirements}\n"
-                    f"Task: {task_description}\n"
+                    "You are an AI proof validator for a habit tracking app. "
+                    "The user submitted this image as proof for the following task:\n"
+                    f"{task_description}\n"
+                    "Requirements: " + proof_requirements + "\n"
+                    "Please answer:\n"
+                    "1. Does the image clearly show the required action or object?\n"
+                    "2. Is the image appropriate (not NSFW or offensive)?\n"
+                    "Respond in JSON with: "
+                    "is_valid (boolean), is_nsfw (boolean), confidence (float 0-1), feedback (string), reasoning (string, optional, max 2 sentences). "
+                    "Be concise. Do not describe unrelated details."
                 )
                 logger.info(f"[ProofValidator] Starting Gemini Vision validation...")
+                start_time = time.time()
+                loop = asyncio.get_event_loop()
                 try:
                     response_text = await asyncio.wait_for(
                         loop.run_in_executor(None, self.gemini_client.analyze_image, proof_file_data, prompt),
                         timeout=20.0
                     )
+                    elapsed = time.time() - start_time
                     logger.info(f"[ProofValidator] Gemini Vision validation response: {response_text}")
                 except asyncio.TimeoutError:
                     logger.warning("[ProofValidator] Gemini Vision validation timed out after 20s!")
                     return TaskValidationResult(
                         is_valid=False,
+                        is_nsfw=False,
                         confidence=0.0,
-                        feedback="AI validation timed out. Please try again or use a different image."
+                        feedback="AI validation timed out. Please try again or use a different image.",
+                        reasoning="AI did not respond in time."
                     )
                 try:
                     # Strip markdown code fences if present
@@ -98,20 +85,28 @@ class ProofValidatorAgent:
 
                     result = json.loads(cleaned_response)
                     is_valid = bool(result.get("is_valid", False))
+                    is_nsfw = bool(result.get("is_nsfw", False))
                     confidence = float(result.get("confidence", 0.0))
                     feedback = str(result.get("feedback", "No feedback provided."))
-                    logger.info(f"[ProofValidator] Parsed validation result: valid={is_valid}, confidence={confidence}")
+                    reasoning = result.get("reasoning")
+                    suggestions = result.get("suggestions", [])
+                    logger.info(f"[ProofValidator] Parsed validation result: valid={is_valid}, nsfw={is_nsfw}, confidence={confidence}")
                     return TaskValidationResult(
                         is_valid=is_valid,
+                        is_nsfw=is_nsfw,
                         confidence=confidence,
-                        feedback=feedback
+                        feedback=feedback,
+                        reasoning=reasoning,
+                        suggestions=suggestions
                     )
                 except Exception as e:
                     logger.error(f"Failed to parse Gemini Vision response: {e}\nRaw response: {response_text}")
                     return TaskValidationResult(
                         is_valid=False,
+                        is_nsfw=False,
                         confidence=0.0,
-                        feedback="Unable to validate proof image due to technical error."
+                        feedback="Unable to validate proof image due to technical error.",
+                        reasoning="AI response could not be parsed."
                     )
             # --- Fallback: text-only validation ---
             prompt = self._create_validation_prompt(
@@ -136,8 +131,10 @@ class ProofValidatorAgent:
             logger.error(f"Error validating proof: {e}")
             return TaskValidationResult(
                 is_valid=False,
+                is_nsfw=False,
                 confidence=0.0,
-                feedback=f"Unable to validate proof due to technical error: {e}"
+                feedback=f"Unable to validate proof due to technical error: {e}",
+                reasoning="Internal error."
             )
 
     def _create_validation_prompt(
@@ -150,42 +147,8 @@ class ProofValidatorAgent:
         habit_name: str
     ) -> str:
         """Create the validation prompt for the AI"""
-
         return f"""
-        You are validating a task completion proof for a habit tracking app.
-
-        **Task Details:**
-        - Habit: {habit_name}
-        - Task: {task_description}
-        - Required Proof: {proof_requirements}
-
-        **Submitted Proof:**
-        - Type: {proof_type}
-        - Content: {proof_content}
-        - User: {user_name}
-
-        **Validation Instructions:**
-        1. Determine if the submitted proof demonstrates completion of the task
-        2. Check if the proof meets the specific requirements stated
-        3. Be encouraging but honest in your assessment
-        4. Consider the intent and effort, not just perfection
-        5. For tiny habits, be more lenient as the goal is building consistency
-
-        **Validation Criteria:**
-        - Does the proof show the task was attempted/completed?
-        - Does it match the proof requirements?
-        - Is there clear evidence of the action described in the task?
-        - For photo/video: Can you see the relevant action or result?
-        - For audio: Can you hear the relevant activity or description?
-        - For text: Does the description indicate task completion?
-
-        **Response Guidelines:**
-        - is_valid: true if proof demonstrates task completion, false otherwise
-        - confidence: 0.0-1.0 based on clarity and completeness of proof
-        - feedback: Encouraging message acknowledging effort and explaining validation
-        - suggestions: Helpful tips for better proof next time (if needed)
-
-        Be supportive and focus on progress, not perfection. The goal is to encourage habit formation.
+You are an AI proof validator for a habit tracking app.\n\nTask Details:\n- Habit: {habit_name}\n- Task: {task_description}\n- Required Proof: {proof_requirements}\n\nSubmitted Proof:\n- Type: {proof_type}\n- Content: {proof_content}\n- User: {user_name}\n\nValidation Instructions:\n1. Determine if the submitted proof demonstrates completion of the task\n2. Check if the proof meets the specific requirements stated\n3. Be encouraging but honest in your assessment\n4. Consider the intent and effort, not just perfection\n5. For tiny habits, be more lenient as the goal is building consistency\n6. If the proof is inappropriate (NSFW), set is_nsfw to true.\n\nResponse Guidelines:\n- is_valid: true if proof demonstrates task completion, false otherwise\n- is_nsfw: true if the proof is inappropriate (NSFW), false otherwise\n- confidence: 0.0-1.0 based on clarity and completeness of proof\n- feedback: Encouraging message acknowledging effort and explaining validation\n- reasoning: Short explanation for the validation result (max 2 sentences)\n- suggestions: Helpful tips for better proof next time (if needed)\n\nRespond ONLY with a JSON object. Be concise."
         """
 
     def _get_validation_system_prompt(self) -> str:

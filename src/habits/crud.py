@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, date
 from typing import List, Dict, Any, Optional
 import json
 from . import models, schemas
+from src.auth.models import User
 
 async def get_habits_by_user(db: AsyncSession, user_id: int):
     result = await db.execute(select(models.Habit).filter(models.Habit.user_id == user_id))
@@ -20,6 +21,14 @@ async def get_habit(db: AsyncSession, habit_id: int, user_id: int):
     return result.scalar_one_or_none()
 
 async def create_user_habit(db: AsyncSession, habit_data: schemas.HabitCreate, user_id: int):
+    # Fetch user and their habits
+    user = await db.get(User, user_id)
+    if user is not None and getattr(user, 'plan', 'free') == 'free':
+        result = await db.execute(select(models.Habit).filter(models.Habit.user_id == user_id))
+        habit_count = len(result.scalars().all())
+        if habit_count >= 2:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=403, detail="Free users can only create up to 2 habits. Upgrade to add more.")
     db_habit = models.Habit(
         name=habit_data.name,
         description=habit_data.description,
@@ -217,6 +226,17 @@ async def update_task_status(
     await db.commit()
     await db.refresh(task)
     return task
+
+async def get_latest_task_validation(db: AsyncSession, task_id: int):
+    from .models import TaskValidation
+    from sqlalchemy import desc
+    result = await db.execute(
+        select(TaskValidation)
+        .where(TaskValidation.task_entry_id == task_id)
+        .order_by(desc(TaskValidation.created_at))
+        .limit(1)
+    )
+    return result.scalar_one_or_none()
 
 # --- Performance History CRUD ---
 

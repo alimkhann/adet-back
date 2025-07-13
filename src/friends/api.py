@@ -1,6 +1,8 @@
 from typing import List
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlalchemy.future import select
 
 from ..auth.dependencies import get_current_user
 from ..auth.models import User as UserModel
@@ -58,6 +60,12 @@ async def send_friend_request(
     friend_request = await FriendsService.send_friend_request(
         db, current_user.id, user_id, request_data.message
     )
+
+    # Eagerly load the receiver relationship
+    result = await db.execute(
+        select(friend_request.__class__).options(selectinload(friend_request.__class__.receiver)).where(friend_request.__class__.id == friend_request.id)
+    )
+    friend_request = result.scalar_one()
 
     return schemas.FriendRequestActionResponse(
         success=True,

@@ -31,7 +31,8 @@ class FileUploadService:
         # Get Azure storage credentials from environment
         self.account_name = os.getenv("AZURE_STORAGE_ACCOUNT_NAME")
         self.account_key = os.getenv("AZURE_STORAGE_ACCOUNT_KEY")
-        self.container_name = os.getenv("AZURE_STORAGE_CONTAINER_NAME", "proof-posts")
+        self.pfp_container_name = os.getenv("AZURE_STORAGE_PFP_CONTAINER_NAME", "profile-images")
+        self.proof_container_name = os.getenv("AZURE_STORAGE_PROOF_CONTAINER_NAME", "proof-posts")
 
         if not AZURE_AVAILABLE or not self.account_name or not self.account_key:
             if not AZURE_AVAILABLE:
@@ -43,23 +44,23 @@ class FileUploadService:
             try:
                 connection_string = f"DefaultEndpointsProtocol=https;AccountName={self.account_name};AccountKey={self.account_key};EndpointSuffix=core.windows.net"
                 self.blob_service_client = BlobServiceClient.from_connection_string(connection_string)
-                # Ensure container exists
-                self._ensure_container_exists()
-                logger.info(f"Azure Blob Storage initialized for container: {self.container_name}")
+                # Ensure both containers exist
+                self._ensure_container_exists(self.pfp_container_name)
+                self._ensure_container_exists(self.proof_container_name)
+                logger.info(f"Azure Blob Storage initialized for containers: {self.pfp_container_name}, {self.proof_container_name}")
             except Exception as e:
                 logger.error(f"Failed to initialize Azure Blob Storage: {e}")
                 self.blob_service_client = None
 
-    def _ensure_container_exists(self):
+    def _ensure_container_exists(self, container_name):
         """Ensure the blob container exists"""
         if not self.blob_service_client:
             return
-
         try:
-            container_client = self.blob_service_client.get_container_client(self.container_name)
+            container_client = self.blob_service_client.get_container_client(container_name)
             if not container_client.exists():
                 container_client.create_container()
-                logger.info(f"Created container: {self.container_name}")
+                logger.info(f"Created container: {container_name}")
         except Exception as e:
             logger.error(f"Error ensuring container exists: {e}")
 
@@ -68,6 +69,12 @@ class FileUploadService:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
         return f"proofs/{user_id}/{task_id}/{timestamp}_{unique_id}.{file_extension}"
+
+    def _generate_pfp_blob_name(self, user_id: str, file_extension: str) -> str:
+        """Generate a unique blob name for a profile image"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        return f"{user_id}/{timestamp}_{unique_id}.{file_extension}"
 
     def _get_file_extension(self, filename: str, content_type: str) -> str:
         """Get file extension from filename or content type"""
@@ -98,18 +105,18 @@ class FileUploadService:
         filename: str,
         content_type: str,
         user_id: str,
-        task_id: int
+        task_id: int,
+        container: Optional[str] = None
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """
         Upload a proof file to Azure Blob Storage or local storage
-
         Args:
             file_data: Raw file data
             filename: Original filename
             content_type: MIME type of the file
             user_id: User ID (for organizing files)
             task_id: Task ID (for organizing files)
-
+            container: Which container to use (proof or pfp)
         Returns:
             Tuple of (success, file_url, error_message)
         """
@@ -121,7 +128,7 @@ class FileUploadService:
 
             # Validate file type
             allowed_types = [
-                'image/jpeg', 'image/png', 'image/gif', 'image/webp',
+                'image/jpeg', 'image/jpg', 'image/png', 'image/gif', 'image/webp',
                 'video/mp4', 'video/quicktime', 'video/x-msvideo',
                 'audio/mpeg', 'audio/wav', 'audio/aac', 'audio/ogg',
                 'text/plain'
@@ -132,7 +139,8 @@ class FileUploadService:
 
             # Try Azure first, fallback to local storage
             if self.blob_service_client:
-                return await self._upload_to_azure(file_data, filename, content_type, user_id, task_id)
+                use_container = container or self.proof_container_name
+                return await self._upload_to_azure(file_data, filename, content_type, user_id, task_id, use_container)
             else:
                 return await self._save_local_file(file_data, filename, user_id, task_id)
 
@@ -140,26 +148,51 @@ class FileUploadService:
             logger.error(f"Unexpected error uploading file: {e}")
             return False, None, f"Upload error: {str(e)}"
 
+    async def upload_pfp_file(
+        self,
+        file_data: bytes,
+        filename: str,
+        content_type: str,
+        user_id: str
+    ) -> Tuple[bool, Optional[str], Optional[str]]:
+        """
+        Upload a profile image to Azure Blob Storage or local storage
+        """
+        file_extension = self._get_file_extension(filename, content_type)
+        blob_name = self._generate_pfp_blob_name(user_id, file_extension)
+        if self.blob_service_client:
+            return await self._upload_to_azure(
+                file_data, filename, content_type, user_id, task_id=0, container=self.pfp_container_name, blob_name=blob_name
+            )
+        else:
+            # Save locally in uploads/profile-images/{user_id}/
+            upload_dir = Path("uploads/profile-images") / user_id
+            upload_dir.mkdir(parents=True, exist_ok=True)
+            file_path = upload_dir / blob_name.split("/")[-1]
+            async with aiofiles.open(file_path, 'wb') as f:
+                await f.write(file_data)
+            local_url = f"/uploads/profile-images/{user_id}/{blob_name.split('/')[-1]}"
+            return True, local_url, None
+
     async def _upload_to_azure(
         self,
         file_data: bytes,
         filename: str,
         content_type: str,
         user_id: str,
-        task_id: int
+        task_id: int,
+        container: str,
+        blob_name: Optional[str] = None
     ) -> Tuple[bool, Optional[str], Optional[str]]:
         """Upload file to Azure Blob Storage"""
         try:
-            # Generate blob name
             file_extension = self._get_file_extension(filename, content_type)
-            blob_name = self._generate_blob_name(user_id, task_id, file_extension)
-
-            # Upload to Azure
+            if not blob_name:
+                blob_name = self._generate_blob_name(user_id, task_id, file_extension)
             blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name,
+                container=container,
                 blob=blob_name
             )
-
             blob_client.upload_blob(
                 file_data,
                 content_type=content_type,
@@ -171,16 +204,11 @@ class FileUploadService:
                     'upload_time': datetime.now().isoformat()
                 }
             )
-
-            # Generate the blob URL
             blob_url = blob_client.url
-
-            logger.info(f"Successfully uploaded proof file to Azure for user {user_id}, task {task_id}: {blob_name}")
+            logger.info(f"Successfully uploaded file to Azure for user {user_id}, task {task_id}: {blob_name} in container {container}")
             return True, blob_url, None
-
         except Exception as e:
             logger.error(f"Azure error uploading file: {e}")
-            # Fallback to local storage
             return await self._save_local_file(file_data, filename, user_id, task_id)
 
     async def _save_local_file(
@@ -218,57 +246,67 @@ class FileUploadService:
             logger.error(f"Error saving file locally: {e}")
             return False, None, str(e)
 
-    def generate_signed_url(self, blob_url: str, expiry_hours: int = 24) -> Optional[str]:
-        """Generate a signed URL for secure access to a blob"""
+    def generate_signed_url(self, blob_url: str, container: Optional[str] = None, expiry_hours: Optional[int] = 24) -> Optional[str]:
+        """Generate a signed URL for secure access to a blob. If expiry_hours=None, generate a non-expiring SAS (for permanent private access)."""
         if not self.blob_service_client or not AZURE_AVAILABLE:
             return blob_url  # Return original URL if no Azure client
-
         try:
             # Extract blob name from URL
-            blob_name = blob_url.split(f"{self.container_name}/")[-1]
-
+            if not container:
+                # Try to infer container from URL
+                if self.pfp_container_name in blob_url:
+                    container = self.pfp_container_name
+                else:
+                    container = self.proof_container_name
+            blob_name = blob_url.split(f"{container}/")[-1]
             # Generate SAS token
+            if expiry_hours is None:
+                # Permanent SAS: set expiry far in the future (e.g. 100 years)
+                expiry = datetime.utcnow() + timedelta(days=365*100)
+            else:
+                expiry = datetime.utcnow() + timedelta(hours=expiry_hours)
             sas_token = generate_blob_sas(
                 account_name=self.account_name,
-                container_name=self.container_name,
+                container_name=container,
                 blob_name=blob_name,
                 account_key=self.account_key,
                 permission=BlobSasPermissions(read=True),
-                expiry=datetime.utcnow() + timedelta(hours=expiry_hours)
+                expiry=expiry
             )
-
             return f"{blob_url}?{sas_token}"
-
         except Exception as e:
             logger.error(f"Error generating signed URL: {e}")
             return blob_url  # Return original URL as fallback
 
-    async def delete_proof_file(self, blob_url: str) -> bool:
+    def generate_permanent_signed_url(self, blob_url: str, container: Optional[str] = None) -> Optional[str]:
+        """Generate a non-expiring signed URL for a blob (for private proofs that should not expire)."""
+        return self.generate_signed_url(blob_url, container=container, expiry_hours=None)
+
+    async def delete_proof_file(self, blob_url: str, container: Optional[str] = None) -> bool:
         """
         Delete a proof file from Azure Blob Storage
-
         Args:
             blob_url: The blob URL to delete
-
+            container: Which container to use
         Returns:
             True if deleted successfully, False otherwise
         """
         if not self.blob_service_client:
             return False
-
         try:
-            # Extract blob name from URL
-            blob_name = blob_url.split(f"{self.container_name}/")[-1]
-
+            if not container:
+                if self.pfp_container_name in blob_url:
+                    container = self.pfp_container_name
+                else:
+                    container = self.proof_container_name
+            blob_name = blob_url.split(f"{container}/")[-1]
             blob_client = self.blob_service_client.get_blob_client(
-                container=self.container_name,
+                container=container,
                 blob=blob_name
             )
-
             blob_client.delete_blob()
-            logger.info(f"Successfully deleted blob: {blob_name}")
+            logger.info(f"Successfully deleted blob: {blob_name} from container {container}")
             return True
-
         except Exception as e:
             logger.error(f"Error deleting blob: {e}")
             return False

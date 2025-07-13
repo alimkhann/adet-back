@@ -23,7 +23,8 @@ class Settings(BaseSettings):
 
     # Azure Storage Configuration
     azure_storage_connection_string: str | None = None
-    azure_storage_container_name: str = "profile-images"
+    azure_storage_pfp_container_name: str = "profile-images"
+    azure_storage_proof_container_name: str = "proof-posts"
 
     debug: bool = True
 

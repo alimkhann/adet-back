@@ -39,13 +39,13 @@ class GeminiAIClient:
         """Generate text using Gemini model"""
         full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
         resp = self.client.models.generate_content(
-            model=self.model_name,
-            contents=[full_prompt],
+                model=self.model_name,
+                contents=[full_prompt],
             config=GenerateContentConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                )
             )
-        )
         if not getattr(resp, "text", None):
             logger.error("Empty response from Gemini API: %r", resp)
             raise ValueError("Received empty response from Gemini API")

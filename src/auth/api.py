@@ -5,6 +5,7 @@ import mimetypes
 import httpx
 import os
 import uuid
+from urllib.parse import urlparse, urlunparse
 
 from src.auth.dependencies import get_current_user
 from src.auth.exceptions import UserNotFoundException
@@ -14,8 +15,14 @@ from src.auth.service import AuthService
 from src.database import get_async_db
 from src.config import settings
 from src.services.azure_storage import azure_storage
+from src.services.file_upload import file_upload_service
 
 router = APIRouter()
+
+
+def get_base_blob_url(url):
+    parsed = urlparse(url)
+    return urlunparse(parsed._replace(query="", fragment=""))
 
 
 @router.get("/me", response_model=UserSchema, summary="Get Current User Profile")
@@ -23,80 +30,21 @@ async def read_users_me(current_user: UserModel = Depends(get_current_user)):
     """
     Retrieves the profile information for the currently authenticated user based on their Clerk JWT.
     """
+    # Generate a permanent signed URL for the profile image if it exists
+    if current_user.profile_image_url:
+        base_url = get_base_blob_url(current_user.profile_image_url)
+        signed_url = file_upload_service.generate_permanent_signed_url(base_url, container=file_upload_service.pfp_container_name)
+        current_user.profile_image_url = signed_url
     return current_user
 
 
-@router.post("/me/sync", response_model=UserSchema, summary="Sync User Data from Clerk")
-async def sync_user_from_clerk(
-    current_user: UserModel = Depends(get_current_user),
-    db: AsyncSession = Depends(get_async_db),
-):
-    """
-    Syncs user data from Clerk to update email and other profile information.
-    """
-    try:
-        # Get the user's Clerk ID
-        clerk_id = current_user.clerk_id
-
-        # Fetch user data from Clerk API
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            headers = {
-                "Authorization": f"Bearer {settings.clerk_secret_key}",
-                "Content-Type": "application/json"
-            }
-
-            response = await client.get(
-                f"https://api.clerk.com/v1/users/{clerk_id}",
-                headers=headers
-            )
-
-            if response.status_code == 200:
-                clerk_user_data = response.json()
-
-                # Extract email and username from Clerk data
-                email = None
-                username = None
-
-                # Get primary email
-                if "email_addresses" in clerk_user_data:
-                    for email_data in clerk_user_data["email_addresses"]:
-                        if email_data.get("id") == clerk_user_data.get("primary_email_address_id"):
-                            email = email_data.get("email_address")
-                            break
-
-                # Get username
-                username = clerk_user_data.get("username")
-
-                # Update user in database
-                updated = False
-                if email and email != current_user.email:
-                    current_user.email = email
-                    updated = True
-                if username and username != current_user.username:
-                    current_user.username = username
-                    updated = True
-
-                if updated:
-                    await db.commit()
-                    await db.refresh(current_user)
-
-                return current_user
-            else:
-                raise HTTPException(
-                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="Failed to fetch user data from Clerk"
-                )
-
-    except httpx.TimeoutException:
-        raise HTTPException(
-            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
-            detail="Timeout while syncing user data from Clerk"
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Error syncing user data: {str(e)}"
-        )
+@router.post("/me/sync", response_model=UserSchema, summary="Sync Current User Profile")
+async def sync_user_profile(current_user: UserModel = Depends(get_current_user)):
+    if current_user.profile_image_url:
+        base_url = get_base_blob_url(current_user.profile_image_url)
+        signed_url = file_upload_service.generate_permanent_signed_url(base_url, container=file_upload_service.pfp_container_name)
+        current_user.profile_image_url = signed_url
+    return current_user
 
 
 @router.patch("/me/username", status_code=status.HTTP_204_NO_CONTENT, summary="Update Username")
@@ -149,6 +97,39 @@ async def update_profile(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to update profile: {str(e)}"
         )
+
+
+@router.post("/me/profile-image", response_model=UserSchema, summary="Upload Profile Image")
+async def upload_profile_image(
+    file: UploadFile = File(...),
+    current_user: UserModel = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_db),
+):
+    # Read file data
+    file_data = await file.read()
+    # Delete old profile image if it exists
+    if current_user.profile_image_url:
+        await file_upload_service.delete_proof_file(current_user.profile_image_url, container=file_upload_service.pfp_container_name)
+    # Upload to Azure (use pfp container)
+    success, file_url, error = await file_upload_service.upload_pfp_file(
+        file_data=file_data,
+        filename=file.filename or "profile_image.jpg",
+        content_type=file.content_type or "image/jpeg",
+        user_id=current_user.clerk_id
+    )
+    if not success:
+        raise HTTPException(status_code=400, detail=f"File upload failed: {error}")
+    # Update user profile image URL
+    updated_user = await AuthService.update_profile_image(
+        user_id=current_user.id,
+        profile_image_url=file_url,
+        db=db
+    )
+    # Generate a permanent signed URL for the profile image
+    if updated_user.profile_image_url:
+        signed_url = file_upload_service.generate_permanent_signed_url(updated_user.profile_image_url, container=file_upload_service.pfp_container_name)
+        updated_user.profile_image_url = signed_url
+    return updated_user
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT, summary="Delete User Account")

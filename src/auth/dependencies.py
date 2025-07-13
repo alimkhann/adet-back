@@ -62,6 +62,7 @@ async def get_current_user(
     Decodes the Clerk JWT, verifies it, and retrieves or creates the user
     in the local database.
     """
+    print(">>>> ENTERED get_current_user dependency")
     token = credentials.credentials
     jwks = await get_clerk_public_keys()
 
@@ -124,5 +125,5 @@ async def get_current_user(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Could not retrieve or create user.",
         )
-
+    print(f">>>> get_current_user returning user: {user.id if user else None}")
     return user

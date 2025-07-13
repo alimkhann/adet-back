@@ -1,22 +1,38 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi.responses import JSONResponse
+import json
+
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import MultipleResultsFound
 from typing import List
-from datetime import date, datetime, timedelta
-from pytz import UTC
+from datetime import date, datetime
 import logging
-import pytz
 from sqlalchemy import desc, select
 
-from src.database import get_async_db
+from src.database import get_async_db, get_db
 from src.auth.dependencies import get_current_user
 from src.auth.models import User as UserModel
-from src.ai import get_ai_orchestrator, TaskGenerationContext, AIAgentResponse
+from src.ai import get_ai_orchestrator, TaskGenerationContext
+from ..ai.agents.proof_validator import validate_proof
 from . import crud, schemas
-from .models import TaskEntry
+from .models import TaskEntry, Habit, TaskValidation
+from ..services.file_upload import file_upload_service
+from src.posts.service import PostsService
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+def _get_response_message(task_status: str, validation_result) -> str:
+    """Get appropriate response message based on validation result"""
+    if task_status == "completed":
+        return "🎉 Amazing! Your proof was validated successfully. Keep up the great work!"
+    elif task_status == "failed":
+        return "Your proof couldn't be validated this time. Check the feedback and try again!"
+    elif task_status == "pending_review":
+        return "Proof submitted! Our AI is temporarily unavailable, so this will be reviewed manually."
+    else:
+        return "Proof submitted successfully"
 
 @router.get("/", response_model=List[schemas.Habit])
 async def read_habits(
@@ -66,7 +82,7 @@ async def get_today_task(
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):
-    """Get today's task for a habit"""
+    """Get today's task for a habit, including latest validation as nested object"""
     # Verify habit exists and belongs to user
     habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
     if not habit:
@@ -98,7 +114,38 @@ async def get_today_task(
     if not task:
         raise HTTPException(status_code=404, detail="No task found for today")
 
-    return task
+    # --- Fetch latest validation and attach as .validation ---
+    latest_validation = await crud.get_latest_task_validation(db, task.id)
+    validation_dict = None
+    if latest_validation:
+        import json
+        suggestions = []
+        reasoning = None
+        if latest_validation.suggestions:
+            try:
+                suggestions = json.loads(latest_validation.suggestions)
+            except Exception:
+                suggestions = []
+        if latest_validation.validation_response:
+            try:
+                resp = json.loads(latest_validation.validation_response)
+                reasoning = resp.get("reasoning")
+            except Exception:
+                reasoning = None
+        validation_dict = {
+            "is_valid": latest_validation.is_valid,
+            "is_nsfw": False,  # Set to False unless you store this
+            "confidence": latest_validation.confidence,
+            "feedback": latest_validation.feedback,
+            "reasoning": reasoning,
+            "suggestions": suggestions,
+        }
+
+    # Convert task to dict and add validation
+    task_dict = task.__dict__.copy()
+    task_dict["validation"] = validation_dict
+
+    return task_dict
 
 @router.get("/pending-tasks", response_model=List[schemas.TaskEntryRead])
 async def get_pending_tasks(
@@ -192,183 +239,213 @@ async def generate_and_create_task(
 @router.post("/tasks/{task_id}/submit-proof")
 async def submit_task_proof(
     task_id: int,
-    proof_type: str = Form(...),
-    proof_content: str = Form(...),
-    file: UploadFile = File(None),
+    proof_type: Optional[str] = Form(None),
+    proof_content: Optional[str] = Form(None),
+    file: Optional[UploadFile] = File(None),
     db: AsyncSession = Depends(get_async_db),
-    current_user: UserModel = Depends(get_current_user)
+    current_user=Depends(get_current_user),
 ):
-    """Submit proof for a task with AI validation"""
-    try:
-        # Get the task
-        task = await crud.get_task_by_id(db=db, task_id=task_id, user_id=current_user.id)
-        if not task:
-            raise HTTPException(status_code=404, detail="Task not found")
+    """
+    Submit proof for a task and run AI validation BEFORE saving file permanently.
+    Only save file to Azure and DB if proof is valid and not NSFW.
+    Include concise reasoning in response if present.
+    """
+    validation_result = None
+    file_url: str | None = None
+    file_data: bytes | None = None
 
-        if task.status != "pending":
-            raise HTTPException(status_code=400, detail="Task is not pending")
+    # 1. Pre-flight checks
+    task = await db.execute(
+        select(TaskEntry).where(
+            TaskEntry.id == task_id, TaskEntry.user_id == current_user.id
+        )
+    )
+    task = task.scalars().first()
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    if task.status not in ("pending", "failed") or (task.status == "failed" and getattr(task, "attempts_left", 0) == 0):
+        raise HTTPException(status_code=400, detail="Task is not available for proof submission")
 
-        # Get the habit for context
-        habit = await crud.get_habit(db=db, habit_id=task.habit_id, user_id=current_user.id)
-        if not habit:
-            raise HTTPException(status_code=404, detail="Habit not found")
+    habit = await db.execute(select(Habit).where(Habit.id == task.habit_id))
+    habit = habit.scalars().first()
+    if not habit:
+        raise HTTPException(status_code=404, detail="Habit not found")
 
-        file_url = None
+    # 2. Read file (but do NOT save yet)
+    if file:
+        file_data = await file.read()
+    else:
         file_data = None
 
-        # Handle file upload if provided
-        if file:
-            # Import file upload service
-            from ..services.file_upload import file_upload_service
-
-            # Read file data
-            file_data = await file.read()
-
-            # Upload the file
-            success, file_url, error = await file_upload_service.upload_proof_file(
-                file_data=file_data,
-                filename=file.filename or "proof_file",
-                content_type=file.content_type or "application/octet-stream",
-                user_id=current_user.clerk_id,
-                task_id=task_id
-            )
-
-            if not success:
-                raise HTTPException(status_code=400, detail=f"File upload failed: {error}")
-
-        # Validate the proof using AI
+    # 3. Run AI validation (including NSFW check)
+    try:
+        # Use a concise prompt in your validate_proof implementation
+        validation_result = await validate_proof(
+            task_description=task.task_description,
+            proof_requirements=task.proof_requirements,
+            proof_type=proof_type,
+            proof_content=proof_content,
+            user_name=current_user.username or "User",
+            habit_name=habit.name,
+            proof_file_data=file_data,
+        )
+    except Exception as ai_err:
+        # AI failed – accept submission, but flag for manual review
         validation_result = None
-        try:
-            from ..ai.agents.proof_validator import validate_proof
 
-            validation_result = await validate_proof(
-                task_description=task.task_description,
-                proof_requirements=task.proof_requirements,
-                proof_type=proof_type,
-                proof_content=proof_content,
-                user_name=current_user.name or "User",
-                habit_name=habit.name,
-                proof_file_data=file_data
-            )
-        except Exception as e:
-            logger.error(f"AI validation error: {e}")
-            # Continue without AI validation
-            validation_result = None
+    # 4. Save file to Azure ONLY if valid and not NSFW
+    is_valid = False
+    is_nsfw = False
+    confidence = 0.0
+    feedback = ""
+    reasoning = None
+    suggestions = []
+    if validation_result:
+        is_valid = getattr(validation_result, "is_valid", False)
+        is_nsfw = getattr(validation_result, "is_nsfw", False)
+        confidence = getattr(validation_result, "confidence", 0.0)
+        feedback = getattr(validation_result, "feedback", "")
+        reasoning = getattr(validation_result, "reasoning", None)
+        suggestions = getattr(validation_result, "suggestions", [])
 
-        # Validate with AI results
-        created_post = None
-        if validation_result:
-            is_valid = validation_result.is_valid and validation_result.confidence >= 0.7
-            await crud.validate_task_proof(
-                db=db,
-                task_id=task_id,
-                validation_result=is_valid,
-                confidence=validation_result.confidence,
-                feedback=validation_result.feedback
-            )
+    if file_data and is_valid and not is_nsfw:
+        ok, file_url, err = await file_upload_service.upload_proof_file(
+            file_data=file_data,
+            filename=file.filename or "proof_file",
+            content_type=file.content_type or "application/octet-stream",
+            user_id=current_user.clerk_id,
+            task_id=task_id,
+        )
+        if not ok:
+            raise HTTPException(status_code=400, detail=f"File upload failed: {err}")
+    else:
+        file_url = None
 
-            # --- ENFORCE: Always set to completed if valid and confident ---
-            if is_valid:
-                # Update task status to completed
-                task.status = "completed"
-                task.completed_at = datetime.utcnow()
-                await db.commit()
-                await db.refresh(task)
-                # Do NOT increment habit streak here. Streak is only updated on share.
-                # current_streak = habit.streak or 0
-                # await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=current_streak + 1)
-
-                # Auto-create private post for successful validation
-                try:
-                    from ..posts.crud import PostCRUD
-                    created_post = await PostCRUD.create_post(
-                        db=db,
-                        user_id=current_user.id,
-                        habit_id=task.habit_id,
-                        proof_urls=[file_url] if file_url else [],
-                        proof_type=proof_type,
-                        description=f"Completed: {task.task_description}",
-                        privacy="only_me"
-                    )
-                    await db.commit()
-                    logger.info(f"Auto-created private post {created_post.id} for successful task {task_id}")
-                except Exception as e:
-                    logger.error(f"Failed to auto-create post for task {task_id}: {e}")
-                    created_post = None
-            else:
-                # Decrement attempts_left if invalid
-                if task.attempts_left > 0:
-                    task.attempts_left -= 1
-                    if task.attempts_left == 0:
-                        user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
-                        if user_freezers > 0:
-                            await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
-                        else:
-                            task.status = "failed"
-                            await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
-                await db.commit()
-                await db.refresh(task)
-        else:
-            # Fallback validation - assume valid for now
-            await crud.validate_task_proof(
-                db=db,
-                task_id=task_id,
-                validation_result=True,
-                confidence=0.8,
-                feedback="Proof submitted successfully"
-            )
-            # --- ENFORCE: Always set to completed in fallback ---
+    # 5. Update task and DB
+    task.proof_type = proof_type
+    task.proof_content = file_url or proof_content
+    if validation_result:
+        task.proof_validation_result = validation_result.is_valid
+        task.proof_validation_confidence = validation_result.confidence
+        task.proof_feedback = validation_result.feedback
+        if validation_result.is_valid and validation_result.confidence >= 0.7:
             task.status = "completed"
             task.completed_at = datetime.utcnow()
-            await db.commit()
-            await db.refresh(task)
-            try:
-                from ..posts.crud import PostCRUD
-                created_post = await PostCRUD.create_post(
-                    db=db,
-                    user_id=current_user.id,
-                    habit_id=task.habit_id,
-                    proof_urls=[file_url] if file_url else [],
-                    proof_type=proof_type,
-                    description=f"Completed: {task.task_description}",
-                    privacy="only_me"
+        else:
+            # Failed validation: decrement attempts_left, reset to pending if attempts remain
+            if hasattr(task, "attempts_left") and task.attempts_left is not None:
+                task.attempts_left = max(task.attempts_left - 1, 0)
+                if task.attempts_left > 0:
+                    task.status = "pending"
+                else:
+                    task.status = "failed"
+            else:
+                task.status = "failed"
+    else:  # AI unavailable
+        task.proof_validation_result = None
+        task.proof_validation_confidence = 0.5
+        task.proof_feedback = (
+            "Proof submitted. AI validation temporarily unavailable – manual review required."
+        )
+        task.status = "pending_review"
+
+    # Create or update TaskValidation row only when AI produced a result
+    if validation_result:
+        # Try to find existing TaskValidation for this task
+        existing_validation = await db.execute(
+            select(TaskValidation).where(TaskValidation.task_entry_id == task.id)
+        )
+        existing_validation = existing_validation.scalars().first()
+        if existing_validation:
+            # Update existing row
+            existing_validation.is_valid = is_valid
+            existing_validation.confidence = confidence
+            existing_validation.feedback = feedback
+            existing_validation.suggestions = json.dumps(suggestions)
+            existing_validation.validation_model = "gemini-1.5-pro"
+            existing_validation.validation_prompt = "AI proof validation"
+            existing_validation.validation_response = json.dumps({
+                "reasoning": reasoning,
+                "confidence": confidence,
+            })
+        else:
+            db.add(
+                TaskValidation(
+                    task_entry_id=task.id,
+                    is_valid=is_valid,
+                    confidence=confidence,
+                    feedback=feedback,
+                    suggestions=json.dumps(suggestions),
+                    validation_model="gemini-1.5-pro",
+                    validation_prompt="AI proof validation",
+                    validation_response=json.dumps({
+                        "reasoning": reasoning,
+                        "confidence": confidence,
+                    }),
                 )
-                await db.commit()
-                logger.info(f"Auto-created private post {created_post.id} for fallback validation task {task_id}")
-            except Exception as e:
-                logger.error(f"Failed to auto-create post for task {task_id}: {e}")
-                created_post = None
+            )
 
-        # Get updated task
-        updated_task = await crud.get_task_by_id(db=db, task_id=task_id, user_id=current_user.id)
+    await db.commit()
+    await db.refresh(task)
 
-        response_data = {
-            "success": True,
-            "task": updated_task,
-            "file_url": file_url,
-            "validation": {
-                "is_valid": validation_result.is_valid if validation_result else True,
-                "confidence": validation_result.confidence if validation_result else 0.8,
-                "feedback": validation_result.feedback if validation_result else "Proof submitted successfully",
-                "suggestions": validation_result.suggestions if validation_result else []
-            },
-            "message": "Proof submitted and validated successfully"
-        }
-
-        # Add post info if created
-        if created_post:
-            response_data["auto_created_post"] = {
-                "id": created_post.id,
-                "privacy": created_post.privacy,
-                "description": created_post.description,
-                "created_at": created_post.created_at.isoformat()
+    # --- Auto-create private post after successful proof submission ---
+    auto_created_post = None
+    if task.status == "completed" and file_url:
+        try:
+            # Optimize image (future: add real optimization here if needed)
+            optimized_urls = [file_url]  # Placeholder for future image optimization
+            post = await PostsService.create_post_from_proof(
+                db=db,
+                user_id=current_user.id,
+                habit_id=task.habit_id,
+                proof_urls=optimized_urls,
+                proof_type=proof_type,
+                description=f"Completed: {task.task_description}",
+                privacy="private"
+            )
+            auto_created_post = {
+                "id": post.id,
+                "privacy": post.privacy.value if hasattr(post.privacy, 'value') else post.privacy,
+                "description": post.description,
+                "created_at": post.created_at.isoformat() if hasattr(post, 'created_at') else None
             }
+            logger.info(f"Auto-created private post {post.id} for user {current_user.id} after proof submission")
+        except Exception as e:
+            logger.error(f"Failed to auto-create post after proof: {e}")
 
-        return response_data
-
-    except Exception as e:
-        logger.error(f"Error submitting proof: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to submit proof: {str(e)}")
+    # 6. Build response
+    response = {
+        "success": task.status == "completed",
+        "task": {
+            "id": task.id,
+            "status": task.status,
+            "proof_type": task.proof_type,
+            "proof_content": task.proof_content,
+            "proof_validation_result": task.proof_validation_result,
+            "proof_validation_confidence": task.proof_validation_confidence,
+            "proof_feedback": task.proof_feedback,
+            "completed_at": (
+                task.completed_at.isoformat() if task.completed_at else None
+            ),
+            "celebration_message": (
+                task.celebration_message if task.status == "completed" else None
+            ),
+            "attempts_left": task.attempts_left,
+        },
+        "file_url": file_url,
+        "validation": {
+            "is_valid": is_valid,
+            "is_nsfw": is_nsfw,
+            "confidence": confidence,
+            "feedback": feedback,
+            "reasoning": reasoning,
+            "suggestions": suggestions,
+        },
+        "message": _get_response_message(task.status, validation_result),
+    }
+    if auto_created_post:
+        response["auto_created_post"] = auto_created_post
+    return JSONResponse(status_code=200, content=response)
 
 @router.put("/tasks/{task_id}/status")
 async def update_task_status(

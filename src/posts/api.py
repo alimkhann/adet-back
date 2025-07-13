@@ -1,6 +1,7 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
+from datetime import date
 
 from ..database import get_async_db
 from ..auth.dependencies import get_current_user
@@ -11,26 +12,39 @@ from .schemas import (
     PostCommentCreate, PostCommentRead, PostCommentsResponse,
     PostLikeRead, LikeActionResponse, PostActionResponse, CommentActionResponse,
     PostAnalytics, BatchViewRequest, BatchViewResponse,
-    ProofTypeEnum, PostPrivacyEnum
+    ProofTypeEnum, PostPrivacyEnum, PostResponse
 )
 from ..friends.schemas import UserBasic
 import logging
+from ..services.file_upload import file_upload_service
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.encoders import jsonable_encoder
+from fastapi import status as fastapi_status
+import traceback
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/posts", tags=["posts"])
 
 
+def _get_proof_urls_with_privacy(post, privacy):
+    urls = post.proof_urls or []
+    if privacy == "private":
+        return [file_upload_service.generate_permanent_signed_url(url, container="proof-posts") for url in urls]
+    return urls
+
+
 async def _create_post_handler(
     post_data: PostCreate,
     db: AsyncSession,
-    current_user: dict
+    current_user
 ):
     """Shared handler for creating posts"""
     try:
         post = await PostCRUD.create_post(
             db=db,
-            user_id=current_user["user_id"],
+            user_id=current_user.id,
             habit_id=post_data.habit_id,
             proof_urls=post_data.proof_urls,
             proof_type=post_data.proof_type.value,
@@ -40,18 +54,19 @@ async def _create_post_handler(
 
         # Convert to response format with user info
         user_basic = UserBasic(
-            id=current_user["user_id"],
-            username=current_user.get("username", ""),
-            first_name=current_user.get("first_name", ""),
-            last_name=current_user.get("last_name", ""),
-            profile_image_url=current_user.get("profile_image_url")
+            id=current_user.id,
+            username=getattr(current_user, "username", ""),
+            profile_image_url=getattr(current_user, "profile_image_url", None)
         )
+
+        privacy = post.privacy
+        proof_urls = _get_proof_urls_with_privacy(post, privacy)
 
         post_read = PostRead(
             id=post.id,
             user_id=post.user_id,
             habit_id=post.habit_id,
-            proof_urls=post.proof_urls,
+            proof_urls=proof_urls,
             proof_type=ProofTypeEnum(post.proof_type),
             description=post.description,
             privacy=PostPrivacyEnum(post.privacy),
@@ -79,24 +94,60 @@ async def _create_post_handler(
         )
 
 
-@router.post("/", response_model=PostActionResponse)
-async def create_post_with_slash(
-    post_data: PostCreate,
+# Patch: Log incoming POST /api/v1/posts requests
+@router.post("/", response_model=PostResponse)
+async def create_post(
+    post: PostCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    request: Request = None
 ):
-    """Create a new post (with trailing slash)"""
-    return await _create_post_handler(post_data, db, current_user)
+    if request is not None:
+        try:
+            body = await request.body()
+            logger.info(f"[POSTS] Incoming POST /api/v1/posts payload: {body}")
+        except Exception as e:
+            logger.error(f"[POSTS] Failed to log request body: {e}")
+    # Determine assigned_date
+    assigned_date = post.assigned_date or date.today()
+    created_post = await PostsService.create_post_from_proof(
+        db=db,
+        user_id=current_user["id"] if isinstance(current_user, dict) else current_user.id,
+        habit_id=post.habit_id,
+        proof_urls=post.proof_urls or [],
+        proof_type=post.proof_type.value if hasattr(post.proof_type, "value") else str(post.proof_type),
+        description=post.description,
+        privacy=post.privacy.value if hasattr(post.privacy, "value") else str(post.privacy),
+        assigned_date=assigned_date
+    )
+    return PostResponse(post=created_post)
 
 
 @router.post("", response_model=PostActionResponse)
 async def create_post_without_slash(
     post_data: PostCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(get_current_user),
+    request: Request = None
 ):
-    """Create a new post (without trailing slash)"""
-    return await _create_post_handler(post_data, db, current_user)
+    if request is not None:
+        try:
+            body = await request.body()
+            logger.info(f"[POSTS] Incoming POST /api/v1/posts payload: {body}")
+        except Exception as e:
+            logger.error(f"[POSTS] Failed to log request body: {e}")
+    assigned_date = post_data.assigned_date or date.today()
+    created_post = await PostsService.create_post_from_proof(
+        db=db,
+        user_id=current_user["id"] if isinstance(current_user, dict) else current_user.id,
+        habit_id=post_data.habit_id,
+        proof_urls=post_data.proof_urls or [],
+        proof_type=post_data.proof_type.value if hasattr(post_data.proof_type, "value") else str(post_data.proof_type),
+        description=post_data.description,
+        privacy=post_data.privacy.value if hasattr(post_data.privacy, "value") else str(post_data.privacy),
+        assigned_date=assigned_date
+    )
+    return PostActionResponse(success=True, message="Post created successfully", post=created_post)
 
 
 @router.get("/feed", response_model=PostsResponse)
@@ -104,13 +155,13 @@ async def get_feed_posts(
     cursor: Optional[str] = Query(None, description="Cursor for pagination"),
     limit: int = Query(20, ge=1, le=50, description="Number of posts to return"),
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Get feed posts (3-day window with friend filtering)"""
     try:
         posts, next_cursor = await PostCRUD.get_feed_posts(
             db=db,
-            current_user_id=current_user["user_id"],
+            current_user_id=current_user.id,
             limit=limit,
             cursor=cursor
         )
@@ -119,7 +170,7 @@ async def get_feed_posts(
         posts_with_state = await PostCRUD.get_posts_with_interaction_state(
             db=db,
             posts=posts,
-            current_user_id=current_user["user_id"]
+            current_user_id=current_user.id
         )
 
         # Convert to response format
@@ -128,16 +179,17 @@ async def get_feed_posts(
             user_basic = UserBasic(
                 id=post.user.id,
                 username=post.user.username or "",
-                first_name=post.user.first_name or "",
-                last_name=post.user.last_name or "",
                 profile_image_url=getattr(post.user, 'profile_image_url', None)
             )
+
+            privacy = post.privacy
+            proof_urls = _get_proof_urls_with_privacy(post, privacy)
 
             post_read = PostRead(
                 id=post.id,
                 user_id=post.user_id,
                 habit_id=post.habit_id,
-                proof_urls=post.proof_urls,
+                proof_urls=proof_urls,
                 proof_type=ProofTypeEnum(post.proof_type),
                 description=post.description,
                 privacy=PostPrivacyEnum(post.privacy),
@@ -167,17 +219,88 @@ async def get_feed_posts(
         )
 
 
+@router.get("/me", response_model=PostsResponse)
+async def get_my_posts(
+    limit: int = Query(20, ge=1, le=50, description="Number of posts to return"),
+    cursor: Optional[str] = Query(None, description="Cursor for pagination"),
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user)
+):
+    """Get posts for the authenticated user (profile view)"""
+    try:
+        posts, next_cursor = await PostCRUD.get_user_posts(
+            db=db,
+            user_id=current_user.id,
+            current_user_id=current_user.id,
+            include_private=True,
+            limit=limit,
+            cursor=cursor
+        )
+
+        # Add interaction state
+        posts_with_state = await PostCRUD.get_posts_with_interaction_state(
+            db=db,
+            posts=posts,
+            current_user_id=current_user.id
+        )
+
+        # Convert to response format
+        posts_read = []
+        for post in posts_with_state:
+            # DEBUG: Print ORM post dict
+            logger.info(f"[DEBUG] ORM Post dict: {post.__dict__}")
+            user_basic = UserBasic(
+                id=post.user.id,
+                username=post.user.username or "",
+                profile_image_url=getattr(post.user, 'profile_image_url', None)
+            )
+            privacy = post.privacy
+            proof_urls = _get_proof_urls_with_privacy(post, privacy)
+            post_read = PostRead(
+                id=post.id,
+                user_id=post.user_id,
+                habit_id=post.habit_id,
+                proof_urls=proof_urls,
+                proof_type=ProofTypeEnum(post.proof_type),
+                description=post.description,
+                privacy=PostPrivacyEnum(post.privacy),
+                created_at=post.created_at,
+                updated_at=post.updated_at,
+                views_count=post.views_count,
+                likes_count=post.likes_count,
+                comments_count=post.comments_count,
+                user=user_basic,
+                is_liked_by_current_user=getattr(post, 'is_liked_by_current_user', False),
+                is_viewed_by_current_user=getattr(post, 'is_viewed_by_current_user', False),
+                assigned_date=post.assigned_date  # Explicitly pass assigned_date
+            )
+            posts_read.append(post_read)
+
+        return PostsResponse(
+            posts=posts_read,
+            count=len(posts_read),
+            has_more=next_cursor is not None,
+            next_cursor=next_cursor
+        )
+    except Exception as e:
+        logger.error(f"Error getting my posts: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to get my posts"
+        )
+
+
 @router.get("/{post_id}", response_model=PostRead)
 async def get_post(
     post_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Get a specific post by ID"""
     post = await PostCRUD.get_post_by_id(
         db=db,
         post_id=post_id,
-        current_user_id=current_user["user_id"]
+        current_user_id=current_user.id
     )
 
     if not post:
@@ -190,7 +313,7 @@ async def get_post(
     posts_with_state = await PostCRUD.get_posts_with_interaction_state(
         db=db,
         posts=[post],
-        current_user_id=current_user["user_id"]
+        current_user_id=current_user.id
     )
     post = posts_with_state[0]
 
@@ -198,16 +321,17 @@ async def get_post(
     user_basic = UserBasic(
         id=post.user.id,
         username=post.user.username or "",
-        first_name=post.user.first_name or "",
-        last_name=post.user.last_name or "",
         profile_image_url=getattr(post.user, 'profile_image_url', None)
     )
+
+    privacy = post.privacy
+    proof_urls = _get_proof_urls_with_privacy(post, privacy)
 
     return PostRead(
         id=post.id,
         user_id=post.user_id,
         habit_id=post.habit_id,
-        proof_urls=post.proof_urls,
+        proof_urls=proof_urls,
         proof_type=ProofTypeEnum(post.proof_type),
         description=post.description,
         privacy=PostPrivacyEnum(post.privacy),
@@ -227,13 +351,13 @@ async def update_post(
     post_id: int,
     update_data: PostUpdate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Update a post (description and privacy only)"""
     updated_post = await PostCRUD.update_post(
         db=db,
         post_id=post_id,
-        user_id=current_user["user_id"],
+        user_id=current_user.id,
         description=update_data.description,
         privacy=update_data.privacy.value
     )
@@ -255,7 +379,7 @@ async def update_post_privacy(
     post_id: int,
     privacy_data: dict,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Update post privacy only"""
     try:
@@ -274,7 +398,7 @@ async def update_post_privacy(
         updated_post = await PostCRUD.update_post(
             db=db,
             post_id=post_id,
-            user_id=current_user["user_id"],
+            user_id=current_user.id,
             description=None,  # Don't update description
             privacy=new_privacy
         )
@@ -299,14 +423,14 @@ async def update_post_privacy(
 async def toggle_post_like(
     post_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Toggle like on a post"""
     try:
         is_liked, new_count = await PostLikeCRUD.toggle_post_like(
             db=db,
             post_id=post_id,
-            user_id=current_user["user_id"]
+            user_id=current_user.id
         )
 
         message = "Post liked" if is_liked else "Post unliked"
@@ -350,8 +474,6 @@ async def get_post_likes(
             user=UserBasic(
                 id=like.user.id,
                 username=like.user.username or "",
-                first_name=like.user.first_name or "",
-                last_name=like.user.last_name or "",
                 profile_image_url=getattr(like.user, 'profile_image_url', None)
             )
         )
@@ -380,8 +502,6 @@ async def get_post_comments(
         user_basic = UserBasic(
             id=comment.user.id,
             username=comment.user.username or "",
-            first_name=comment.user.first_name or "",
-            last_name=comment.user.last_name or "",
             profile_image_url=getattr(comment.user, 'profile_image_url', None)
         )
 
@@ -412,14 +532,14 @@ async def get_post_comments(
 async def create_comment(
     comment_data: PostCommentCreate,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Create a new comment"""
     try:
         comment = await PostCommentCRUD.create_comment(
             db=db,
             post_id=comment_data.post_id,
-            user_id=current_user["user_id"],
+            user_id=current_user.id,
             content=comment_data.content,
             parent_comment_id=comment_data.parent_comment_id
         )
@@ -441,14 +561,14 @@ async def create_comment(
 async def mark_post_as_viewed(
     post_id: int,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Mark a post as viewed"""
     try:
         await PostViewCRUD.mark_post_as_viewed(
             db=db,
             post_id=post_id,
-            user_id=current_user["user_id"]
+            user_id=current_user.id
         )
 
         return PostActionResponse(
@@ -468,14 +588,14 @@ async def mark_post_as_viewed(
 async def batch_mark_as_viewed(
     batch_data: BatchViewRequest,
     db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
+    current_user = Depends(get_current_user)
 ):
     """Mark multiple posts as viewed"""
     try:
         processed_count = await PostViewCRUD.batch_mark_as_viewed(
             db=db,
             post_ids=batch_data.post_ids,
-            user_id=current_user["user_id"]
+            user_id=current_user.id
         )
 
         failed_count = len(batch_data.post_ids) - processed_count
@@ -492,72 +612,4 @@ async def batch_mark_as_viewed(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process batch view request"
-        )
-
-
-@router.get("/me", response_model=PostsResponse)
-async def get_my_posts(
-    limit: int = Query(20, ge=1, le=50, description="Number of posts to return"),
-    cursor: Optional[str] = Query(None, description="Cursor for pagination"),
-    db: AsyncSession = Depends(get_async_db),
-    current_user: dict = Depends(get_current_user)
-):
-    """Get posts for the authenticated user (profile view)"""
-    try:
-        posts, next_cursor = await PostCRUD.get_user_posts(
-            db=db,
-            user_id=current_user["user_id"],
-            current_user_id=current_user["user_id"],
-            include_private=True,
-            limit=limit,
-            cursor=cursor
-        )
-
-        # Add interaction state
-        posts_with_state = await PostCRUD.get_posts_with_interaction_state(
-            db=db,
-            posts=posts,
-            current_user_id=current_user["user_id"]
-        )
-
-        # Convert to response format
-        posts_read = []
-        for post in posts_with_state:
-            user_basic = UserBasic(
-                id=post.user.id,
-                username=post.user.username or "",
-                first_name=post.user.first_name or "",
-                last_name=post.user.last_name or "",
-                profile_image_url=getattr(post.user, 'profile_image_url', None)
-            )
-            post_read = PostRead(
-                id=post.id,
-                user_id=post.user_id,
-                habit_id=post.habit_id,
-                proof_urls=post.proof_urls,
-                proof_type=ProofTypeEnum(post.proof_type),
-                description=post.description,
-                privacy=PostPrivacyEnum(post.privacy),
-                created_at=post.created_at,
-                updated_at=post.updated_at,
-                views_count=post.views_count,
-                likes_count=post.likes_count,
-                comments_count=post.comments_count,
-                user=user_basic,
-                is_liked_by_current_user=getattr(post, 'is_liked_by_current_user', False),
-                is_viewed_by_current_user=getattr(post, 'is_viewed_by_current_user', False)
-            )
-            posts_read.append(post_read)
-
-        return PostsResponse(
-            posts=posts_read,
-            count=len(posts_read),
-            has_more=next_cursor is not None,
-            next_cursor=next_cursor
-        )
-    except Exception as e:
-        logger.error(f"Error getting my posts: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to get my posts"
         )

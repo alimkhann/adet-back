@@ -51,8 +51,10 @@ class TaskGenerationContext(BaseModel):
 class TaskValidationResult(BaseModel):
     """Result of task proof validation"""
     is_valid: bool = Field(..., description="Whether the proof validates the task")
+    is_nsfw: bool = Field(default=False, description="Whether the proof is NSFW/inappropriate")
     confidence: float = Field(..., ge=0.0, le=1.0, description="Confidence in validation")
     feedback: str = Field(..., description="Feedback on the proof")
+    reasoning: Optional[str] = Field(None, description="Short explanation for the validation result")
     suggestions: List[str] = Field(default_factory=list, description="Suggestions for improvement")
 
 class AIAgentResponse(BaseModel):

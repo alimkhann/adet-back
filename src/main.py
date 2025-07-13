@@ -7,6 +7,12 @@ from contextlib import asynccontextmanager
 import os
 
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+import traceback
+import logging
+
+logger = logging.getLogger("uvicorn.error")
 
 from . import models
 from .database import async_engine, get_async_db, init_db, close_db
@@ -25,9 +31,6 @@ async def lifespan(app: FastAPI):
     await init_db()
     yield
     await close_db()
-
-# Create uploads directory before app initialization
-os.makedirs("uploads/profile_images", exist_ok=True)
 
 app = FastAPI(
     title="ädet FastAPI PostgreSQL Project",
@@ -65,6 +68,19 @@ api_router.include_router(support_router, prefix="/support", tags=["Support"])
 
 app.include_router(api_router)
 app.include_router(webhooks_router, tags=["webhooks"])
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request, exc):
+    body = await request.body()
+    logger.error(
+        f"[POSTS] Validation error for request {request.url}: {exc.errors()}\n"
+        f"Body: {body}\n"
+        f"Traceback: {traceback.format_exc()}"
+    )
+    return JSONResponse(
+        status_code=422,
+        content={"detail": exc.errors(), "body": exc.body},
+    )
 
 @app.get("/")
 async def root():

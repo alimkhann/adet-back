@@ -27,6 +27,9 @@ class Habit(HabitBase):
     user_id: int
     streak: int
 
+    class Config:
+        from_attributes = True
+
 class UserStreakFreezers(BaseModel):
     streak_freezers: int
 
@@ -65,6 +68,7 @@ class TaskEntryRead(TaskEntryBase):
     created_at: datetime
     updated_at: Optional[datetime] = None
     attempts_left: int
+    validation: Optional["TaskValidationResult"] = None
 
     class Config:
         from_attributes = True
@@ -78,8 +82,10 @@ class TaskStatusUpdate(BaseModel):
 
 class TaskValidationResult(BaseModel):
     is_valid: bool
+    is_nsfw: bool = False
     confidence: float = Field(..., ge=0.0, le=1.0)
     feedback: str
+    reasoning: Optional[str] = None
     suggestions: List[str] = Field(default_factory=list)
 
 # --- AI Task Generation Schemas ---

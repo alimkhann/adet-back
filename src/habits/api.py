@@ -565,6 +565,24 @@ async def check_and_mark_expired_tasks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check expired tasks: {str(e)}")
 
+@router.get("/tasks/{task_id}/proof-url")
+async def get_fresh_proof_url(
+    task_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """
+    Return a fresh signed (SAS) URL for the proof image of a given task.
+    """
+    task = await db.execute(
+        select(TaskEntry).where(TaskEntry.id == task_id, TaskEntry.user_id == current_user.id)
+    )
+    task = task.scalars().first()
+    if not task or not task.proof_content:
+        raise HTTPException(status_code=404, detail="No proof found for this task.")
+    signed_url = file_upload_service.generate_signed_url(task.proof_content, container=file_upload_service.proof_container_name)
+    return {"url": signed_url}
+
 # --- AI Task Generation Endpoints ---
 
 @router.post("/{habit_id}/generate-task")

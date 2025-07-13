@@ -22,6 +22,7 @@ from fastapi.responses import JSONResponse
 from fastapi.encoders import jsonable_encoder
 from fastapi import status as fastapi_status
 import traceback
+from src.habits.crud import get_habit, update_habit_streak
 
 logger = logging.getLogger(__name__)
 
@@ -30,9 +31,8 @@ router = APIRouter(prefix="/posts", tags=["posts"])
 
 def _get_proof_urls_with_privacy(post, privacy):
     urls = post.proof_urls or []
-    if privacy == "private":
-        return [file_upload_service.generate_permanent_signed_url(url, container="proof-posts") for url in urls]
-    return urls
+    # Always return signed URLs, regardless of privacy
+    return [file_upload_service.generate_signed_url(url, container="proof-posts") for url in urls]
 
 
 async def _create_post_handler(
@@ -77,7 +77,8 @@ async def _create_post_handler(
             comments_count=post.comments_count,
             user=user_basic,
             is_liked_by_current_user=False,
-            is_viewed_by_current_user=False
+            is_viewed_by_current_user=False,
+            assigned_date=post.assigned_date
         )
 
         return PostActionResponse(
@@ -123,7 +124,7 @@ async def create_post(
     return PostResponse(post=created_post)
 
 
-@router.post("", response_model=PostActionResponse)
+@router.post("/", response_model=PostActionResponse)
 async def create_post_without_slash(
     post_data: PostCreate,
     db: AsyncSession = Depends(get_async_db),
@@ -200,7 +201,8 @@ async def get_feed_posts(
                 comments_count=post.comments_count,
                 user=user_basic,
                 is_liked_by_current_user=getattr(post, 'is_liked_by_current_user', False),
-                is_viewed_by_current_user=getattr(post, 'is_viewed_by_current_user', False)
+                is_viewed_by_current_user=getattr(post, 'is_viewed_by_current_user', False),
+                assigned_date=post.assigned_date
             )
             posts_read.append(post_read)
 
@@ -354,6 +356,20 @@ async def update_post(
     current_user = Depends(get_current_user)
 ):
     """Update a post (description and privacy only)"""
+    # Fetch the original post
+    post = await PostCRUD.get_post_by_id(db, post_id)
+    if not post or post.user_id != current_user.id:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Post not found or access denied"
+        )
+
+    # Check if privacy is being changed from private to friends/close_friends
+    privacy_changing = (
+        post.privacy == "private" and
+        update_data.privacy.value in ("friends", "close_friends")
+    )
+
     updated_post = await PostCRUD.update_post(
         db=db,
         post_id=post_id,
@@ -362,11 +378,27 @@ async def update_post(
         privacy=update_data.privacy.value
     )
 
-    if not updated_post:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Post not found or access denied"
+    # If privacy is changing, check if streak should be incremented
+    if privacy_changing:
+        # Check if there is already a shared post for this habit and date
+        from .models import Post
+        from sqlalchemy import select
+        existing_shared = await db.execute(
+            select(Post)
+            .where(
+                Post.user_id == current_user.id,
+                Post.habit_id == post.habit_id,
+                Post.assigned_date == post.assigned_date,
+                Post.privacy.in_(["friends", "close_friends"])
+            )
         )
+        already_shared = existing_shared.scalars().first()
+        if not already_shared:
+            # Increment streak for this habit
+            habit = await get_habit(db, habit_id=post.habit_id, user_id=current_user.id)
+            if habit:
+                new_streak = (habit.streak or 0) + 1
+                await update_habit_streak(db, habit_id=habit.id, streak_count=new_streak)
 
     return PostActionResponse(
         success=True,

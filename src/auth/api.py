@@ -16,6 +16,7 @@ from src.database import get_async_db
 from src.config import settings
 from src.services.azure_storage import azure_storage
 from src.services.file_upload import file_upload_service
+from src.posts.crud import PostCRUD
 
 router = APIRouter()
 
@@ -159,3 +160,11 @@ async def delete_account(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to delete account: {str(e)}"
         )
+
+@router.get("/me/post-count", response_model=dict)
+async def get_my_post_count(
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user)
+):
+    count = await PostCRUD.get_user_post_count(db, current_user.id)
+    return {"post_count": count}

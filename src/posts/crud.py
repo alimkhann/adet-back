@@ -289,6 +289,17 @@ class PostCRUD:
 
         return posts
 
+    @staticmethod
+    async def get_user_post_count(db: AsyncSession, user_id: int) -> int:
+        from sqlalchemy import func
+        result = await db.execute(
+            select(func.count()).select_from(Post).where(
+                Post.user_id == user_id,
+                Post.privacy != "private"
+            )
+        )
+        return result.scalar_one() or 0
+
 
 class PostLikeCRUD:
     """CRUD operations for post likes"""

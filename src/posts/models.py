@@ -195,3 +195,25 @@ class PostReport(Base):
         Index('idx_report_status', 'status'),
         Index('idx_report_created_at', 'created_at'),
     )
+
+
+class CommentReport(Base):
+    """Represents a report on a comment for content moderation."""
+    __tablename__ = "comment_reports"
+
+    id = Column(Integer, primary_key=True, index=True)
+    comment_id = Column(Integer, ForeignKey("post_comments.id", ondelete="CASCADE"), nullable=False)
+    reporter_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    reason = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    status = Column(String, nullable=False, default="pending")
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+
+    __table_args__ = (
+        UniqueConstraint('reporter_id', 'comment_id', name='unique_comment_report'),
+        Index('idx_comment_report_comment_id', 'comment_id'),
+        Index('idx_comment_report_status', 'status'),
+        Index('idx_comment_report_created_at', 'created_at'),
+    )

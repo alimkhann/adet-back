@@ -543,6 +543,44 @@ class PostCommentCRUD:
 
         return replies, next_cursor
 
+    @staticmethod
+    async def delete_comment(db: AsyncSession, comment_id: int, user_id: int) -> bool:
+        """Delete a comment (owner only)"""
+        result = await db.execute(
+            select(PostComment)
+            .where(and_(PostComment.id == comment_id, PostComment.user_id == user_id))
+        )
+        comment = result.scalars().first()
+        if not comment:
+            return False
+        await db.delete(comment)
+        await db.commit()
+        logger.info(f"Deleted comment {comment_id} by user {user_id}")
+        return True
+
+    @staticmethod
+    async def report_comment(db: AsyncSession, comment_id: int, reporter_id: int, reason: str, description: str = None) -> bool:
+        """Report a comment for moderation"""
+        from .models import CommentReport
+        # Check for existing report
+        result = await db.execute(
+            select(CommentReport)
+            .where(and_(CommentReport.comment_id == comment_id, CommentReport.reporter_id == reporter_id))
+        )
+        existing = result.scalars().first()
+        if existing:
+            return False  # Already reported
+        report = CommentReport(
+            comment_id=comment_id,
+            reporter_id=reporter_id,
+            reason=reason,
+            description=description
+        )
+        db.add(report)
+        await db.commit()
+        logger.info(f"User {reporter_id} reported comment {comment_id} for reason: {reason}")
+        return True
+
 
 class PostViewCRUD:
     """CRUD operations for post views"""

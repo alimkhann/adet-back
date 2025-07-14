@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, status, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, status, Query, Request, Body
 from sqlalchemy.ext.asyncio import AsyncSession
 from typing import Optional, List
 from datetime import date
@@ -513,6 +513,34 @@ async def get_post_likes(
     ]
 
 
+@router.post("/comments/{comment_id}/like", response_model=LikeActionResponse)
+async def toggle_comment_like(
+    comment_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user)
+):
+    """Toggle like on a comment"""
+    try:
+        is_liked, new_count = await PostLikeCRUD.toggle_comment_like(
+            db=db,
+            comment_id=comment_id,
+            user_id=current_user.id
+        )
+        message = "Comment liked" if is_liked else "Comment unliked"
+        return LikeActionResponse(
+            success=True,
+            message=message,
+            is_liked=is_liked,
+            likes_count=new_count
+        )
+    except Exception as e:
+        logger.error(f"Error toggling comment like: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to toggle comment like"
+        )
+
+
 @router.get("/{post_id}/comments", response_model=PostCommentsResponse)
 async def get_post_comments(
     post_id: int,
@@ -528,6 +556,21 @@ async def get_post_comments(
         limit=limit,
         cursor=cursor
     )
+
+    # Get liked comment ids for current user
+    comment_ids = [comment.id for comment in comments]
+    liked_comment_ids = set()
+    if comment_ids:
+        from .models import PostLike
+        from sqlalchemy import select, and_
+        likes_result = await db.execute(
+            select(PostLike.comment_id)
+            .where(and_(
+                PostLike.user_id == (current_user["id"] if isinstance(current_user, dict) else current_user.id),
+                PostLike.comment_id.in_(comment_ids)
+            ))
+        )
+        liked_comment_ids = set(row[0] for row in likes_result.fetchall())
 
     comments_read = []
     for comment in comments:
@@ -548,7 +591,7 @@ async def get_post_comments(
             likes_count=comment.likes_count,
             replies_count=comment.replies_count,
             user=user_basic,
-            is_liked_by_current_user=False  # TODO: Add interaction state
+            is_liked_by_current_user=comment.id in liked_comment_ids
         )
         comments_read.append(comment_read)
 
@@ -586,6 +629,50 @@ async def create_comment(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to create comment"
+        )
+
+
+@router.delete("/comments/{comment_id}", response_model=CommentActionResponse)
+async def delete_comment(
+    comment_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user)
+):
+    """Delete a comment (owner only)"""
+    try:
+        deleted = await PostCommentCRUD.delete_comment(db, comment_id=comment_id, user_id=current_user.id)
+        if not deleted:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Comment not found or not owned by user"
+            )
+        return CommentActionResponse(success=True, message="Comment deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting comment: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to delete comment"
+        )
+
+@router.post("/comments/{comment_id}/report", response_model=CommentActionResponse)
+async def report_comment(
+    comment_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user),
+    reason: str = Body(..., embed=True),
+    description: Optional[str] = Body(None, embed=True)
+):
+    """Report a comment for moderation"""
+    try:
+        reported = await PostCommentCRUD.report_comment(db, comment_id=comment_id, reporter_id=current_user.id, reason=reason, description=description)
+        if not reported:
+            return CommentActionResponse(success=False, message="You have already reported this comment.")
+        return CommentActionResponse(success=True, message="Comment reported successfully.")
+    except Exception as e:
+        logger.error(f"Error reporting comment: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to report comment"
         )
 
 

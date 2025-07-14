@@ -27,6 +27,7 @@ class PostBase(BaseModel):
     habit_id: Optional[int] = None
     proof_urls: Optional[List[str]] = None
     proof_type: ProofTypeEnum
+    proof_content: Optional[str] = None
     description: Optional[str] = Field(None, max_length=280)
     privacy: PostPrivacyEnum = PostPrivacyEnum.FRIENDS
     assigned_date: Optional[date] = None

@@ -1,5 +1,5 @@
 from typing import Optional
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Request
 from fastapi.responses import JSONResponse
 import json
 
@@ -239,6 +239,7 @@ async def generate_and_create_task(
 @router.post("/tasks/{task_id}/submit-proof")
 async def submit_task_proof(
     task_id: int,
+    request: Request,
     proof_type: Optional[str] = Form(None),
     proof_content: Optional[str] = Form(None),
     file: Optional[UploadFile] = File(None),
@@ -247,9 +248,19 @@ async def submit_task_proof(
 ):
     """
     Submit proof for a task and run AI validation BEFORE saving file permanently.
-    Only save file to Azure and DB if proof is valid and not NSFW.
-    Include concise reasoning in response if present.
+    Accepts both JSON and form-data for proof_type and proof_content.
     """
+    # --- PATCH: Accept JSON or form-data ---
+    json_proof_type = None
+    json_proof_content = None
+    if request.headers.get("content-type", "").startswith("application/json"):
+        data = await request.json()
+        json_proof_type = data.get("proof_type")
+        json_proof_content = data.get("proof_content")
+    # Prefer form-data if present, else use JSON
+    effective_proof_type = proof_type or json_proof_type
+    effective_proof_content = proof_content or json_proof_content
+    # --- END PATCH ---
     validation_result = None
     file_url: str | None = None
     file_data: bytes | None = None
@@ -279,18 +290,16 @@ async def submit_task_proof(
 
     # 3. Run AI validation (including NSFW check)
     try:
-        # Use a concise prompt in your validate_proof implementation
         validation_result = await validate_proof(
             task_description=task.task_description,
             proof_requirements=task.proof_requirements,
-            proof_type=proof_type,
-            proof_content=proof_content,
+            proof_type=effective_proof_type,
+            proof_content=effective_proof_content,
             user_name=current_user.username or "User",
             habit_name=habit.name,
             proof_file_data=file_data,
         )
     except Exception as ai_err:
-        # AI failed – accept submission, but flag for manual review
         validation_result = None
 
     # 4. Save file to Azure ONLY if valid and not NSFW
@@ -322,8 +331,11 @@ async def submit_task_proof(
         file_url = None
 
     # 5. Update task and DB
-    task.proof_type = proof_type
-    task.proof_content = file_url or proof_content
+    task.proof_type = effective_proof_type
+    if effective_proof_type == "text":
+        task.proof_content = effective_proof_content
+    else:
+        task.proof_content = file_url or effective_proof_content
     if validation_result:
         task.proof_validation_result = validation_result.is_valid
         task.proof_validation_confidence = validation_result.confidence
@@ -390,18 +402,22 @@ async def submit_task_proof(
 
     # --- Auto-create private post after successful proof submission ---
     auto_created_post = None
-    if task.status == "completed" and file_url:
+    if task.status == "completed":
         try:
-            # Optimize image (future: add real optimization here if needed)
-            optimized_urls = [file_url]  # Placeholder for future image optimization
+            if effective_proof_type == "text":
+                optimized_urls = [task.proof_content] if task.proof_content else []
+            else:
+                optimized_urls = [file_url] if file_url else []
             post = await PostsService.create_post_from_proof(
                 db=db,
                 user_id=current_user.id,
                 habit_id=task.habit_id,
                 proof_urls=optimized_urls,
-                proof_type=proof_type,
+                proof_type=effective_proof_type,
                 description=f"Completed: {task.task_description}",
-                privacy="private"
+                privacy="private",
+                assigned_date=task.assigned_date,  # Always pass assigned_date
+                proof_content=task.proof_content if effective_proof_type == "text" else None
             )
             auto_created_post = {
                 "id": post.id,
@@ -409,6 +425,9 @@ async def submit_task_proof(
                 "description": post.description,
                 "created_at": post.created_at.isoformat() if hasattr(post, 'created_at') else None
             }
+            # Include proof_content for text posts
+            if post.proof_type == "text":
+                auto_created_post["proof_content"] = post.proof_content
             logger.info(f"Auto-created private post {post.id} for user {current_user.id} after proof submission")
         except Exception as e:
             logger.error(f"Failed to auto-create post after proof: {e}")

@@ -48,6 +48,7 @@ async def _create_post_handler(
             habit_id=post_data.habit_id,
             proof_urls=post_data.proof_urls,
             proof_type=post_data.proof_type.value,
+            proof_content=post_data.proof_content,
             description=post_data.description,
             privacy=post_data.privacy.value
         )
@@ -68,6 +69,7 @@ async def _create_post_handler(
             habit_id=post.habit_id,
             proof_urls=proof_urls,
             proof_type=ProofTypeEnum(post.proof_type),
+            proof_content=post.proof_content,
             description=post.description,
             privacy=PostPrivacyEnum(post.privacy),
             created_at=post.created_at,
@@ -117,6 +119,7 @@ async def create_post(
         habit_id=post.habit_id,
         proof_urls=post.proof_urls or [],
         proof_type=post.proof_type.value if hasattr(post.proof_type, "value") else str(post.proof_type),
+        proof_content=post.proof_content,
         description=post.description,
         privacy=post.privacy.value if hasattr(post.privacy, "value") else str(post.privacy),
         assigned_date=assigned_date
@@ -144,6 +147,7 @@ async def create_post_without_slash(
         habit_id=post_data.habit_id,
         proof_urls=post_data.proof_urls or [],
         proof_type=post_data.proof_type.value if hasattr(post_data.proof_type, "value") else str(post_data.proof_type),
+        proof_content=post_data.proof_content,
         description=post_data.description,
         privacy=post_data.privacy.value if hasattr(post_data.privacy, "value") else str(post_data.privacy),
         assigned_date=assigned_date
@@ -192,6 +196,7 @@ async def get_feed_posts(
                 habit_id=post.habit_id,
                 proof_urls=proof_urls,
                 proof_type=ProofTypeEnum(post.proof_type),
+                proof_content=post.proof_content,
                 description=post.description,
                 privacy=PostPrivacyEnum(post.privacy),
                 created_at=post.created_at,
@@ -264,6 +269,7 @@ async def get_my_posts(
                 habit_id=post.habit_id,
                 proof_urls=proof_urls,
                 proof_type=ProofTypeEnum(post.proof_type),
+                proof_content=post.proof_content,
                 description=post.description,
                 privacy=PostPrivacyEnum(post.privacy),
                 created_at=post.created_at,
@@ -335,6 +341,7 @@ async def get_post(
         habit_id=post.habit_id,
         proof_urls=proof_urls,
         proof_type=ProofTypeEnum(post.proof_type),
+        proof_content=post.proof_content,
         description=post.description,
         privacy=PostPrivacyEnum(post.privacy),
         created_at=post.created_at,
@@ -344,7 +351,8 @@ async def get_post(
         comments_count=post.comments_count,
         user=user_basic,
         is_liked_by_current_user=getattr(post, 'is_liked_by_current_user', False),
-        is_viewed_by_current_user=getattr(post, 'is_viewed_by_current_user', False)
+        is_viewed_by_current_user=getattr(post, 'is_viewed_by_current_user', False),
+        assigned_date=post.assigned_date
     )
 
 

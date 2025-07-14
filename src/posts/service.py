@@ -33,29 +33,30 @@ class PostsService:
         proof_type: str,
         description: Optional[str] = None,
         privacy: str = "friends",
-        assigned_date: Optional[date] = None
+        assigned_date: Optional[date] = None,
+        proof_content: Optional[str] = None
     ) -> PostRead:
         """Create a post from habit proof submission, or return existing if duplicate."""
         try:
-            # Map 'photo' to 'image' for ProofTypeEnum compatibility
             proof_type_mapped = proof_type
             if proof_type == "photo":
                 proof_type_mapped = "image"
 
-            # Validate and optimize media URLs
-            optimized_urls = []
-            for url in proof_urls:
-                # Cache media URL for faster access
-                media_id = url.split('/')[-1].split('.')[0]  # Extract ID from URL
-                redis_service.cache_media_url(media_id, url, ttl=86400)  # Cache for 24h
-                optimized_urls.append(url)
+            if proof_type_mapped == "text":
+                optimized_urls = []
+                content = proof_content
+            else:
+                optimized_urls = []
+                content = None
+                for url in proof_urls:
+                    media_id = url.split('/')[-1].split('.')[0]
+                    redis_service.cache_media_url(media_id, url, ttl=86400)
+                    optimized_urls.append(url)
 
-            # Always set assigned_date
             if not assigned_date:
                 assigned_date = date.today()
 
             try:
-                # Try to create the post
                 post = await PostCRUD.create_post(
                     db=db,
                     user_id=user_id,
@@ -64,10 +65,10 @@ class PostsService:
                     proof_type=proof_type_mapped,
                     description=description,
                     privacy=privacy,
-                    assigned_date=assigned_date
+                    assigned_date=assigned_date,
+                    proof_content=content
                 )
             except IntegrityError as ie:
-                # Unique constraint failed, fetch existing post
                 await db.rollback()
                 logger.info(f"Duplicate post detected for user={user_id}, habit={habit_id}, assigned_date={assigned_date}. Returning existing post.")
                 result = await db.execute(
@@ -84,7 +85,6 @@ class PostsService:
                 else:
                     raise ValueError("Post already exists but could not fetch it.")
 
-            # Get user info for response
             user_result = await db.get(User, user_id)
             if not user_result:
                 raise ValueError("User not found")
@@ -95,13 +95,13 @@ class PostsService:
                 profile_image_url=getattr(user_result, 'profile_image_url', None)
             )
 
-            # Convert to response format
             post_read = PostRead(
                 id=post.id,
                 user_id=post.user_id,
                 habit_id=post.habit_id,
                 proof_urls=post.proof_urls,
                 proof_type=ProofTypeEnum(post.proof_type),
+                proof_content=post.proof_content,
                 description=post.description,
                 privacy=PostPrivacyEnum(post.privacy),
                 assigned_date=post.assigned_date,

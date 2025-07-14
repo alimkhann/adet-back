@@ -11,8 +11,17 @@ class HabitBase(BaseModel):
     difficulty: str
     proof_style: str
 
-class HabitCreate(HabitBase):
-    pass
+class HabitCreate(BaseModel):
+    name: str
+    description: str
+    frequency: str
+    validation_time: str
+    difficulty: str
+    proof_style: str = Field(..., alias="proofStyle")
+    share: bool = False
+
+    class Config:
+        allow_population_by_field_name = True
 
 class HabitUpdate(BaseModel):
     name: Optional[str] = None
@@ -20,7 +29,11 @@ class HabitUpdate(BaseModel):
     frequency: Optional[str] = None
     validation_time: Optional[str] = None
     difficulty: Optional[str] = None
-    proof_style: Optional[str] = None
+    proof_style: Optional[str] = Field(None, alias="proofStyle")
+    share: Optional[bool] = None
+
+    class Config:
+        allow_population_by_field_name = True
 
 class Habit(HabitBase):
     id: int

@@ -26,7 +26,8 @@ class PostCRUD:
         description: Optional[str],
         privacy: str,
         habit_streak: Optional[int] = None,
-        assigned_date: date = None
+        assigned_date: date = None,
+        proof_content: Optional[str] = None
     ) -> Post:
         """Create a new post, or return existing if already present for user/habit/day"""
         if assigned_date is None:
@@ -51,7 +52,8 @@ class PostCRUD:
             description=description,
             privacy=privacy,
             habit_streak=habit_streak,
-            assigned_date=assigned_date
+            assigned_date=assigned_date,
+            proof_content=proof_content
         )
         db.add(post)
         await db.commit()

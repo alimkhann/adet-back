@@ -79,6 +79,13 @@ async def create_task_entry(
     due_date: datetime
 ) -> models.TaskEntry:
     """Create a new AI-generated task entry"""
+    # --- BEGIN PATCH: Set proof_type ---
+    habit = await db.get(models.Habit, habit_id)
+    if habit and habit.proof_style:
+        proof_type = habit.proof_style.lower()
+    else:
+        proof_type = "photo"
+    # --- END PATCH ---
     db_task = models.TaskEntry(
         habit_id=habit_id,
         user_id=user_id,
@@ -94,7 +101,8 @@ async def create_task_entry(
         due_date=due_date,
         ai_generation_metadata=json.dumps(task_data.get("metadata", {})),
         calibration_metadata=json.dumps(task_data.get("calibration_metadata", {})),
-        attempts_left=3  # Set default attempts
+        attempts_left=3,  # Set default attempts
+        proof_type=proof_type  # <-- set proof_type
     )
 
     db.add(db_task)
@@ -169,7 +177,15 @@ async def submit_task_proof(
         raise ValueError("Task is not pending")
 
     # Update task with proof
-    task.proof_type = proof_type
+    # --- PATCH: Always set proof_type if missing ---
+    if not task.proof_type:
+        if proof_type:
+            task.proof_type = proof_type
+        else:
+            habit = await db.get(models.Habit, task.habit_id)
+            if habit and habit.proof_style:
+                task.proof_type = habit.proof_style.lower()
+    # --- END PATCH ---
     task.proof_content = proof_content
     task.status = models.TaskStatus.completed
     task.completed_at = datetime.utcnow()

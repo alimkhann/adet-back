@@ -34,6 +34,7 @@ class Post(Base):
     # Media content
     proof_urls = Column(JSON, nullable=False)  # Array of media URLs
     proof_type = Column(String, nullable=False)  # ProofType enum value
+    proof_content = Column(Text, nullable=True)  # For text proofs only
     description = Column(Text, nullable=True)
 
     # Privacy and visibility

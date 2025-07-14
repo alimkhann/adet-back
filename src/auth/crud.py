@@ -4,6 +4,7 @@ from typing import Optional
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.future import select
+from sqlalchemy import func
 
 from .exceptions import (DatabaseException, UserAlreadyExistsException,
                              UserNotFoundException)
@@ -37,9 +38,11 @@ class UserDAO:
                     logger.info(f"Updating email for user {user.id} to {email}")
                     user.email = email
                     updated = True
+                if username:
+                    username = username.lower()
                 if username and user.username != username:
                     logger.info(f"Updating username for user {user.id} to {username}")
-                    user.username = username
+                    user.username = username.lower() if username else None
                     updated = True
 
                 if updated:
@@ -49,7 +52,7 @@ class UserDAO:
 
             # If user does not exist, create a new one
             logger.info(f"User with clerk_id {clerk_id} not found. Creating new user.")
-            new_user = User(clerk_id=clerk_id, email=email, username=username)
+            new_user = User(clerk_id=clerk_id, email=email, username=username.lower() if username else None)
             db.add(new_user)
             logger.info("Committing new user to the database...")
             await db.commit()
@@ -79,9 +82,24 @@ class UserDAO:
             raise DatabaseException(f"get_user_by_id: {str(e)}")
 
     @staticmethod
+    async def get_user_by_username(username: str, db: AsyncSession) -> Optional[User]:
+        """Get user by username (case-insensitive, always lowercased)."""
+        try:
+            query = select(User).where(func.lower(User.username) == username.lower())
+            result = await db.execute(query)
+            user = result.scalars().first()
+            if user:
+                await db.refresh(user)
+            return user
+        except Exception as e:
+            raise DatabaseException(f"get_user_by_username: {str(e)}")
+
+    @staticmethod
     async def update_user(user: User, db: AsyncSession) -> User:
         """Update an existing user."""
         try:
+            if user.username:
+                user.username = user.username.lower()
             await db.commit()
             await db.refresh(user)
             return user

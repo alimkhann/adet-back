@@ -19,6 +19,7 @@ class AuthService:
         db: AsyncSession
     ) -> UserModel:
         """Update user username."""
+        username = username.lower() if username else None
         user = await UserDAO.get_user_by_id_or_raise(user_id, db)
         user.username = username
         return await UserDAO.update_user(user, db)
@@ -87,6 +88,8 @@ class AuthService:
         user = await UserDAO.get_user_by_id_or_raise(user_id, db)
 
         # Check if username is already taken by another user
+        if username:
+            username = username.lower()
         if username and username != user.username:
             existing_user = await UserDAO.get_user_by_username(username, db)
             if existing_user and existing_user.id != user_id:

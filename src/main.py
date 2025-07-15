@@ -59,7 +59,7 @@ async def startup_event():
         await conn.run_sync(models.Base.metadata.create_all)
 
 # Main API router with versioning
-api_router = APIRouter(prefix="/v1")
+api_router = APIRouter(prefix="api/v1")
 api_router.include_router(auth_router, prefix="/users", tags=["Users"])
 api_router.include_router(onboarding_router, prefix="/onboarding", tags=["Onboarding"])
 api_router.include_router(habits_router, prefix="/habits", tags=["Habits"])

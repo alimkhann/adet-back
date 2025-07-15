@@ -26,7 +26,7 @@ jobs:
 
   deploy:
     needs: build
-    runs-on: [ self-hosted, linux ]
+    runs-on: ubuntu-latest
     steps:
       - name: SSH to VM & deploy
         uses: appleboy/ssh-action@v0.1.6

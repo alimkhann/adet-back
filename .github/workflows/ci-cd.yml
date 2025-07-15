@@ -5,7 +5,7 @@ on:
     branches: [ main ]
 
 jobs:
-  build-and-push:
+  build:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,8 +24,8 @@ jobs:
           push: true
           tags: adetappacr.azurecr.io/adet-backend:latest
 
-  deploy-to-vm:
-    needs: build-and-push
+  deploy:
+    needs: build
     runs-on: [ self-hosted, linux ]
     steps:
       - name: SSH to VM & deploy

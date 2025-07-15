@@ -39,12 +39,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Mount static files immediately after app creation
-app.mount("/uploads", StaticFiles(directory="uploads"), name="uploads")
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://tryadet.com",
+        "https://www.tryadet.com",
+        "https://api.tryadet.com",
+        "http://localhost:3000",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -57,7 +59,7 @@ async def startup_event():
         await conn.run_sync(models.Base.metadata.create_all)
 
 # Main API router with versioning
-api_router = APIRouter(prefix="/api/v1")
+api_router = APIRouter(prefix="/v1")
 api_router.include_router(auth_router, prefix="/users", tags=["Users"])
 api_router.include_router(onboarding_router, prefix="/onboarding", tags=["Onboarding"])
 api_router.include_router(habits_router, prefix="/habits", tags=["Habits"])

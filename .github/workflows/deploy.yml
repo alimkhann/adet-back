@@ -1,0 +1,44 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [ main ]
+
+jobs:
+  build-and-push:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to ACR
+        uses: docker/login-action@v2
+        with:
+          registry: adetappacr.azurecr.io
+          username: ${{ secrets.ACR_USER }}
+          password: ${{ secrets.ACR_PASS }}
+
+      - name: Build & push image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: adetappacr.azurecr.io/adet-backend:latest
+
+  deploy-to-vm:
+    needs: build-and-push
+    runs-on: [ self-hosted, linux ]
+    steps:
+      - name: SSH to VM & deploy
+        uses: appleboy/ssh-action@v0.1.6
+        with:
+          host: ${{ secrets.VM_HOST }}
+          username: azureuser
+          key: ${{ secrets.VM_SSH_KEY }}
+          script: |
+            docker pull adetappacr.azurecr.io/adet-backend:latest
+            docker rm -f adet-backend || true
+            docker run -d \
+              --name adet-backend \
+              -p 127.0.0.1:8000:8000 \
+              --env-file ~/adet-back.env \
+              adetappacr.azurecr.io/adet-backend:latest

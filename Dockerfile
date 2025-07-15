@@ -9,6 +9,7 @@ WORKDIR /app
 
 # Install system dependencies
 RUN apt-get update \
+    && apt-get upgrade -y \
     && apt-get install -y --no-install-recommends \
         postgresql-client \
         build-essential \

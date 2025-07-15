@@ -6,6 +6,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from contextlib import asynccontextmanager
 import os
 
+from .auth.dependencies import get_current_user
+
+from fastapi.openapi.docs import get_swagger_ui_html, get_redoc_html
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
@@ -36,7 +39,10 @@ app = FastAPI(
     title="ädet FastAPI PostgreSQL Project",
     description="A FastAPI backend with PostgreSQL database",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url=None
 )
 
 app.add_middleware(
@@ -102,4 +108,14 @@ async def health_check(db: AsyncSession = Depends(get_async_db)):
         "database": "connected"
     }
 
+@app.get("/docs", include_in_schema=False)
+async def custom_swagger_ui(user=Depends(get_current_user)):
+    return get_swagger_ui_html(openapi_url="/openapi.json", title="ädet API Docs")
 
+@app.get("/redoc", include_in_schema=False)
+async def custom_redoc(user=Depends(get_current_user)):
+    return get_redoc_html(openapi_url="/openapi.json", title="ädet API ReDoc")
+
+@app.get("/openapi.json", include_in_schema=False)
+async def openapi(user=Depends(get_current_user)):
+    return JSONResponse(app.openapi())

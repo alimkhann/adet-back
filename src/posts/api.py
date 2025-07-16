@@ -12,7 +12,8 @@ from .schemas import (
     PostCommentCreate, PostCommentRead, PostCommentsResponse,
     PostLikeRead, LikeActionResponse, PostActionResponse, CommentActionResponse,
     PostAnalytics, BatchViewRequest, BatchViewResponse,
-    ProofTypeEnum, PostPrivacyEnum, PostResponse
+    ProofTypeEnum, PostPrivacyEnum, PostResponse,
+    PostReportCreate, PostReportRead
 )
 from ..friends.schemas import UserBasic
 import logging
@@ -23,6 +24,8 @@ from fastapi.encoders import jsonable_encoder
 from fastapi import status as fastapi_status
 import traceback
 from src.habits.crud import get_habit, update_habit_streak
+from .models import PostReport
+from sqlalchemy import select
 
 logger = logging.getLogger(__name__)
 
@@ -740,3 +743,50 @@ async def batch_mark_as_viewed(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to process batch view request"
         )
+
+# --- Post Reporting Endpoint ---
+@router.post("/{post_id}/report", response_model=PostActionResponse)
+async def report_post(
+    post_id: int,
+    report_data: PostReportCreate,
+    db: AsyncSession = Depends(get_async_db),
+    current_user = Depends(get_current_user)
+):
+    """Report a post for content moderation."""
+    # Check if post exists
+    from .models import Post
+    post = await db.get(Post, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    # Check for duplicate report
+    existing = await db.execute(
+        select(PostReport).where(
+            PostReport.post_id == post_id,
+            PostReport.reporter_id == current_user.id
+        )
+    )
+    if existing.scalars().first():
+        return PostActionResponse(success=False, message="You have already reported this post.")
+
+    # Validate reason
+    allowed_reasons = [
+        'spam', 'inappropriate', 'harassment', 'false_information',
+        'violence', 'hate_speech', 'adult_content', 'other'
+    ]
+    if report_data.reason not in allowed_reasons:
+        raise HTTPException(status_code=400, detail=f"Reason must be one of: {', '.join(allowed_reasons)}")
+
+    # Create report
+    new_report = PostReport(
+        post_id=post_id,
+        reporter_id=current_user.id,
+        reason=report_data.reason,
+        description=report_data.description,
+        status="pending"
+    )
+    db.add(new_report)
+    await db.commit()
+    await db.refresh(new_report)
+
+    return PostActionResponse(success=True, message="Post reported successfully.")

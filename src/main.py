@@ -1,5 +1,4 @@
 from fastapi import Depends, FastAPI, HTTPException, APIRouter
-from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from sqlalchemy.exc import OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -52,6 +51,7 @@ app.add_middleware(
         "https://www.tryadet.com",
         "https://api.tryadet.com",
         "http://localhost:3000",
+        "http://localhost:8000"
     ],
     allow_credentials=True,
     allow_methods=["*"],

@@ -444,8 +444,7 @@ class SupportService:
         category = "general"
         subject = f"Public Support: {email}"
         message = question
-        # user_id is required by the model, so we use a placeholder
-        user_id = "public"
+        user_id = None  # for public requests
         return await create_support_request(
             self.db,
             user_id=user_id,

@@ -13,7 +13,7 @@ class SupportRequest(Base):
     __tablename__ = "support_requests"
 
     id = Column(Integer, primary_key=True, index=True)
-    user_id = Column(String, ForeignKey("users.clerk_id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.clerk_id"), nullable=True)
     category = Column(String(50), nullable=False)
     subject = Column(String(255), nullable=False)
     message = Column(Text, nullable=False)

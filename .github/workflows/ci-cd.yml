@@ -39,8 +39,7 @@ jobs:
             docker rm -f adet-backend || true
             docker run -d \
               --name adet-backend \
+              --env-file adet-back.env \
               --network app-network \
               -p 8000:8000 \
-              -e DATABASE_URL=postgresql://postgres:postgres@db:5432/fastapi_db \
-              -e REDIS_URL=redis://redis:6379/0 \
               adetappacr.azurecr.io/adet-backend:latest

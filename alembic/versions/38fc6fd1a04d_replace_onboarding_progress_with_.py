@@ -32,7 +32,12 @@ def upgrade() -> None:
     sa.UniqueConstraint('user_id')
     )
     op.create_index(op.f('ix_onboarding_answers_id'), 'onboarding_answers', ['id'], unique=False)
-    op.drop_index(op.f('ix_onboarding_progress_id'), table_name='onboarding_progress')
+    conn = op.get_bind()
+    result = conn.execute(
+        sa.text("SELECT to_regclass('public.ix_onboarding_progress_id')")
+    ).scalar()
+    if result:
+        op.drop_index(op.f('ix_onboarding_progress_id'), table_name='onboarding_progress')
     op.drop_table('onboarding_progress')
     op.drop_index(op.f('ix_users_clerk_id'), table_name='users')
     op.create_index(op.f('ix_users_clerk_id'), 'users', ['clerk_id'], unique=True)

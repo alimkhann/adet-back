@@ -3,6 +3,7 @@ from sqlalchemy import desc, and_, select
 from typing import List, Optional
 from datetime import datetime
 import logging
+from fastapi import HTTPException
 
 from .models import (
     SupportRequest, BugReport, SupportResponse,
@@ -284,9 +285,12 @@ class SupportService:
                 country=db_email.country,
                 status=db_email.status
             )
+        except ValueError as e:
+            logger.error(f"Waitlist error: {e}")
+            raise HTTPException(status_code=409, detail=str(e))
         except Exception as e:
             logger.error(f"Error adding waitlist email: {e}")
-            raise
+            raise HTTPException(status_code=500, detail="Internal server error")
 
     async def get_waitlist_emails_service(self, skip: int = 0, limit: int = 100, filter: str = None, date: str = None) -> WaitlistEmailList:
         """Get paginated list of waitlist emails with optional filtering"""

@@ -1,13 +1,18 @@
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, cast, Date
 from .models import WaitlistEmail, SupportRequest, BugReport
+from sqlalchemy.exc import IntegrityError
 
 async def create_waitlist_email(db: AsyncSession, email: str, country: str = None, status: str = "success") -> WaitlistEmail:
     db_email = WaitlistEmail(email=email, country=country, status=status)
     db.add(db_email)
-    await db.commit()
-    await db.refresh(db_email)
-    return db_email
+    try:
+        await db.commit()
+        await db.refresh(db_email)
+        return db_email
+    except IntegrityError:
+        await db.rollback()
+        raise ValueError("This email is already on the waitlist.")
 
 async def get_waitlist_emails(db: AsyncSession, skip: int = 0, limit: int = 100, filter: str = None, date: str = None) -> list[WaitlistEmail]:
     query = select(WaitlistEmail)

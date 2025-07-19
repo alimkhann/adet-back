@@ -1,4 +1,4 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 class OnboardingAnswerBase(BaseModel):
     habit_name: str
@@ -6,7 +6,10 @@ class OnboardingAnswerBase(BaseModel):
     frequency: str
     validation_time: str
     difficulty: str
-    proof_style: str
+    proof_style: str = Field(..., alias="proofStyle")
+
+    class Config:
+        allow_population_by_field_name = True
 
 class OnboardingAnswerCreate(OnboardingAnswerBase):
     pass

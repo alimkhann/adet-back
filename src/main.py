@@ -25,7 +25,7 @@ from .habits.api import router as habits_router
 from .friends.api import router as friends_router
 from .chats.api import router as chats_router
 from .posts.api import router as posts_router
-from .support import router as support_router
+from .support.router import router as support_router
 
 
 @asynccontextmanager

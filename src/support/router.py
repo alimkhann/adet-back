@@ -23,6 +23,7 @@ from .schemas import (
 )
 from .service import SupportService
 from .admin_middleware import get_admin_user
+from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
@@ -419,4 +420,27 @@ async def update_bug_report_admin(
     if not report:
         raise HTTPException(status_code=404, detail="Bug report not found")
     return report
+
+class PublicSupportRequestCreate(BaseModel):
+    email: str
+    question: str
+
+@router.post("/support-requests", tags=["support"])
+async def create_public_support_request(
+    data: PublicSupportRequestCreate,
+    db: AsyncSession = Depends(get_async_db)
+):
+    """Public endpoint for landing page support form (email, question)."""
+    try:
+        # Store as a support request with generic category/subject
+        service = SupportService(db)
+        # You may want to customize this logic as needed
+        support_request = await service.create_support_request_from_public(
+            email=data.email,
+            question=data.question
+        )
+        return {"success": True, "id": support_request.id}
+    except Exception as e:
+        logger.error(f"Error creating public support request: {e}")
+        raise HTTPException(status_code=500, detail="Internal server error")
 

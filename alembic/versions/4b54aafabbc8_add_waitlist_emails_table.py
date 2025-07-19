@@ -19,7 +19,7 @@ depends_on = None
 def upgrade() -> None:
     op.create_table(
         'waitlist_emails',
-        sa.Column('id', sa.Integer(), primary_key=True, index=True),
+        sa.Column('id', sa.Integer(), primary_key=True, index=True, autoincrement=True),
         sa.Column('email', sa.String(length=255), unique=True, nullable=False, index=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text('now()')),
     )

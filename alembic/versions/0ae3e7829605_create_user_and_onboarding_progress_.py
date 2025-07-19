@@ -32,7 +32,17 @@ def upgrade() -> None:
         sa.Column('role', sa.Integer(), nullable=False, server_default=sa.text('2')),
         sa.Column('plan', sa.String(length=32), nullable=False, server_default=sa.text("'free'")),
     )
+    op.create_table(
+        'onboarding_progress',
+        sa.Column('id', sa.Integer(), primary_key=True),
+        sa.Column('user_id', sa.Integer(), sa.ForeignKey('users.id'), nullable=False),
+        sa.Column('step', sa.String(length=64), nullable=False),
+        sa.Column('completed', sa.Boolean(), nullable=False, server_default=sa.text('false')),
+        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+    )
 
 
 def downgrade() -> None:
+    op.drop_table('onboarding_progress')
     op.drop_table('users')

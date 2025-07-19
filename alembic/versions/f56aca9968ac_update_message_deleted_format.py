@@ -18,17 +18,27 @@ depends_on = None
 
 def upgrade() -> None:
     # Update existing messages to use new format without brackets
-    op.execute("""
-        UPDATE messages
-        SET content = 'Message deleted'
-        WHERE content = '[Message deleted]'
-    """)
+    conn = op.get_bind()
+    messages_exists = conn.execute(
+        sa.text("SELECT 1 FROM information_schema.tables WHERE table_name='messages'")
+    ).scalar()
+    if messages_exists:
+        op.execute("""
+            UPDATE messages
+            SET content = 'Message deleted'
+            WHERE content = '[Message deleted]'
+        """)
 
 
 def downgrade() -> None:
     # Revert back to old format with brackets
-    op.execute("""
-        UPDATE messages
-        SET content = '[Message deleted]'
-        WHERE content = 'Message deleted'
-    """)
+    conn = op.get_bind()
+    messages_exists = conn.execute(
+        sa.text("SELECT 1 FROM information_schema.tables WHERE table_name='messages'")
+    ).scalar()
+    if messages_exists:
+        op.execute("""
+            UPDATE messages
+            SET content = '[Message deleted]'
+            WHERE content = 'Message deleted'
+        """)

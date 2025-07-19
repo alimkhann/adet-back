@@ -26,7 +26,7 @@ async def create_onboarding_answers_for_user(
         frequency=answer.frequency,
         validation_time=answer.validation_time,
         difficulty=answer.difficulty,
-        proof_style=answer.proof_style
+        proofStyle=answer.proof_style
     )
     await habits_crud.create_user_habit(db=db, habit_data=habit_data, user_id=current_user.id)
 

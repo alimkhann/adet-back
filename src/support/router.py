@@ -19,7 +19,8 @@ from .schemas import (
     SupportRequestUpdate as SchemaSupportRequestUpdate,
     BugReportCreate as SchemaBugReportCreate,
     BugReportResponse as SchemaBugReportResponse,
-    BugReportUpdate as SchemaBugReportUpdate
+    BugReportUpdate as SchemaBugReportUpdate,
+    PublicSupportRequestCreate
 )
 from .service import SupportService
 from .admin_middleware import get_admin_user

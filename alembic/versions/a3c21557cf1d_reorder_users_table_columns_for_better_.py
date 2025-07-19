@@ -17,49 +17,40 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # Reorder columns in users table for better organization
-    # New order: id, clerk_id, email, username, is_active, created_at, updated_at
-
-    # PostgreSQL doesn't have a direct way to reorder columns, so we need to:
-    # 1. Create a new table with the desired column order
-    # 2. Copy data from the old table
-    # 3. Drop the old table
-    # 4. Rename the new table
-
-    # First, drop the foreign key constraint
-    op.execute("ALTER TABLE onboarding_progress DROP CONSTRAINT IF EXISTS onboarding_progress_user_id_fkey")
-
-    # Create new table with desired column order
-    op.execute("""
-        CREATE TABLE users_new (
-            id SERIAL PRIMARY KEY,
-            clerk_id VARCHAR NOT NULL,
-            email VARCHAR NOT NULL,
-            username VARCHAR,
-            is_active BOOLEAN DEFAULT true,
-            created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
-            updated_at TIMESTAMP WITH TIME ZONE
-        )
-    """)
-
-    # Copy data from old table to new table
-    op.execute("""
-        INSERT INTO users_new (id, clerk_id, email, username, is_active, created_at, updated_at)
-        SELECT id, clerk_id, email, username, is_active, created_at, updated_at
-        FROM users
-    """)
-
-    # Drop the old table
-    op.execute("DROP TABLE users")
-
-    # Rename new table to original name
-    op.execute("ALTER TABLE users_new RENAME TO users")
-
-    # Recreate indexes
-    op.execute("CREATE INDEX ix_users_clerk_id ON users (clerk_id)")
-    op.execute("CREATE INDEX ix_users_email ON users (email)")
-    op.execute("CREATE INDEX ix_users_id ON users (id)")
-
+    # WARNING: This migration drops and recreates the users table. Make sure the schema matches your current models and no data is lost.
+    conn = op.get_bind()
+    # Drop the foreign key constraint only if it exists
+    fk_exists = conn.execute(
+        sa.text("SELECT 1 FROM information_schema.table_constraints WHERE table_name='onboarding_progress' AND constraint_name='onboarding_progress_user_id_fkey'")
+    ).scalar()
+    if fk_exists:
+        op.execute("ALTER TABLE onboarding_progress DROP CONSTRAINT onboarding_progress_user_id_fkey")
+    # Only create users_new if users exists
+    users_exists = conn.execute(
+        sa.text("SELECT 1 FROM information_schema.tables WHERE table_name='users'")
+    ).scalar()
+    if users_exists:
+        op.execute("""
+            CREATE TABLE users_new (
+                id SERIAL PRIMARY KEY,
+                clerk_id VARCHAR NOT NULL,
+                email VARCHAR NOT NULL,
+                username VARCHAR,
+                is_active BOOLEAN DEFAULT true,
+                created_at TIMESTAMP WITH TIME ZONE DEFAULT now(),
+                updated_at TIMESTAMP WITH TIME ZONE
+            )
+        """)
+        op.execute("""
+            INSERT INTO users_new (id, clerk_id, email, username, is_active, created_at, updated_at)
+            SELECT id, clerk_id, email, username, is_active, created_at, updated_at
+            FROM users
+        """)
+        op.execute("DROP TABLE users")
+        op.execute("ALTER TABLE users_new RENAME TO users")
+        op.execute("CREATE INDEX ix_users_clerk_id ON users (clerk_id)")
+        op.execute("CREATE INDEX ix_users_email ON users (email)")
+        op.execute("CREATE INDEX ix_users_id ON users (id)")
     # Recreate the foreign key constraint
     op.execute("""
         ALTER TABLE onboarding_progress

@@ -21,10 +21,20 @@ def upgrade() -> None:
     op.alter_column('users', 'username',
                existing_type=sa.VARCHAR(),
                nullable=True)
-    op.drop_constraint('users_username_key', 'users', type_='unique')
-    op.drop_column('users', 'bio')
-    op.drop_column('users', 'name')
-    op.drop_column('users', 'profile_image_url')
+    conn = op.get_bind()
+    # Conditionally drop constraint if it exists
+    constraint_exists = conn.execute(
+        sa.text("SELECT 1 FROM information_schema.table_constraints WHERE table_name='users' AND constraint_name='users_username_key'")
+    ).scalar()
+    if constraint_exists:
+        op.drop_constraint('users_username_key', 'users', type_='unique')
+    # Conditionally drop columns if they exist
+    for col in ['bio', 'name', 'profile_image_url']:
+        col_exists = conn.execute(
+            sa.text(f"SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='{col}'")
+        ).scalar()
+        if col_exists:
+            op.drop_column('users', col)
     # ### end Alembic commands ###
 
 

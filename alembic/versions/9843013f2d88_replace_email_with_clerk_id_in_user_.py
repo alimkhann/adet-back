@@ -25,8 +25,13 @@ def upgrade() -> None:
     if result:
         op.drop_index(op.f('ix_users_email'), table_name='users')
     op.create_index(op.f('ix_users_clerk_id'), 'users', ['clerk_id'], unique=True)
-    op.drop_column('users', 'hashed_password')
-    op.drop_column('users', 'email')
+    # Conditionally drop columns if they exist
+    for col in ['hashed_password', 'email']:
+        col_exists = conn.execute(
+            text(f"SELECT 1 FROM information_schema.columns WHERE table_name='users' AND column_name='{col}'")
+        ).scalar()
+        if col_exists:
+            op.drop_column('users', col)
 
 
 def downgrade() -> None:

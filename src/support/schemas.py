@@ -39,6 +39,10 @@ class SupportRequestCreate(BaseModel):
     message: str = Field(..., min_length=1, description="Detailed description of the issue")
     system_info: Optional[SystemInfo] = None
 
+class PublicSupportRequestCreate(BaseModel):
+    email: str
+    question: str
+
 class SupportRequestUpdate(BaseModel):
     status: Optional[str] = Field(None, description="New status")
     priority: Optional[str] = Field(None, description="New priority")

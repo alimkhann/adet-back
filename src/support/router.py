@@ -421,10 +421,6 @@ async def update_bug_report_admin(
         raise HTTPException(status_code=404, detail="Bug report not found")
     return report
 
-class PublicSupportRequestCreate(BaseModel):
-    email: str
-    question: str
-
 @router.post("/support-requests", tags=["support"])
 async def create_public_support_request(
     data: PublicSupportRequestCreate,

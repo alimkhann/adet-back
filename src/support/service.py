@@ -438,3 +438,20 @@ class SupportService:
             logger.error(f"Error getting bug reports count: {e}")
             raise
 
+    async def create_support_request_from_public(self, email: str, question: str):
+        # Store a support request from a public (unauthenticated) user
+        # Use generic values for category/subject, and store email in subject/message
+        category = "general"
+        subject = f"Public Support: {email}"
+        message = question
+        # user_id is required by the model, so we use a placeholder
+        user_id = "public"
+        return await create_support_request(
+            self.db,
+            user_id=user_id,
+            category=category,
+            subject=subject,
+            message=message,
+            system_info=None
+        )
+

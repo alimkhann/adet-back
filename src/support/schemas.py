@@ -51,6 +51,7 @@ class SupportRequestUpdate(BaseModel):
 
 class SupportRequestResponse(BaseModel):
     id: int
+    user_id: Optional[str] = None
     category: str
     subject: str
     message: str

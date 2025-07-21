@@ -2,6 +2,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func, and_, cast, Date
 from .models import WaitlistEmail, SupportRequest, BugReport
 from sqlalchemy.exc import IntegrityError
+from typing import Optional
 
 async def create_waitlist_email(db: AsyncSession, email: str, country: str = None, status: str = "success") -> WaitlistEmail:
     db_email = WaitlistEmail(email=email, country=country, status=status)
@@ -49,7 +50,7 @@ async def bulk_create_waitlist_emails(db: AsyncSession, emails: list[str]) -> li
 
     return db_emails
 
-async def create_support_request(db: AsyncSession, user_id: str, category: str, subject: str, message: str, system_info: dict = None) -> SupportRequest:
+async def create_support_request(db: AsyncSession, user_id: Optional[str], category: str, subject: str, message: str, system_info: dict = None) -> SupportRequest:
     db_request = SupportRequest(
         user_id=user_id,
         category=category,

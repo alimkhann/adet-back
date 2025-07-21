@@ -32,7 +32,7 @@ class SupportService:
         self.db = db
 
     # Support Request Methods
-    def create_support_request(self, user_id: str, request_data: SupportRequestCreate) -> SupportRequest:
+    def create_support_request(self, user_id: Optional[str], request_data: SupportRequestCreate) -> SupportRequest:
         """Create a new support request"""
         if request_data.category not in SUPPORT_CATEGORIES:
             raise ValueError(f"Invalid category. Must be one of: {SUPPORT_CATEGORIES}")
@@ -54,14 +54,15 @@ class SupportService:
         # Send email notifications
         try:
             # Get user email from database
-            user = self.db.query(User).filter(User.clerk_id == user_id).first()
-            if user and user.email:
-                email_service.send_support_request_notification(
-                    user.email, support_request.id, support_request.category, support_request.subject
-                )
-                email_service.send_admin_notification(
-                    "support", support_request.id, user.email, support_request.category, support_request.subject
-                )
+            if user_id:
+                user = self.db.query(User).filter(User.clerk_id == user_id).first()
+                if user and user.email:
+                    email_service.send_support_request_notification(
+                        user.email, support_request.id, support_request.category, support_request.subject
+                    )
+                    email_service.send_admin_notification(
+                        "support", support_request.id, user.email, support_request.category, support_request.subject
+                    )
         except Exception as e:
             logger.error(f"Failed to send email notifications for support request {support_request.id}: {e}")
 

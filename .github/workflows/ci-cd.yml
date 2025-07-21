@@ -28,19 +28,16 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - name: SSH & deploy to VM
+      - name: SSH & Deploy with Docker Compose
         uses: appleboy/ssh-action@v0.1.6
         with:
           host: ${{ secrets.VM_HOST }}
           username: azureuser
           key: ${{ secrets.VM_SSH_KEY }}
           script: |
-            docker pull adetappacr.azurecr.io/adet-backend:latest
-            docker rm -f adet-backend || true
-            docker run -d \
-              --name adet-backend \
-              --restart unless-stopped \
-              --env-file adet-back.env \
-              --network app-network \
-              -p 8000:8000 \
-              adetappacr.azurecr.io/adet-backend:latest
+            set -e
+            cd ~/adet-backend
+            git pull origin main
+            docker-compose pull web
+            docker-compose up -d web
+            docker image prune -f

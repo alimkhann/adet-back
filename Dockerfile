@@ -14,7 +14,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Copy and enable wait‑for script
-COPY wait-for-postgres.sh /usr/local/bin/
+COPY scripts/wait-for-postgres.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/wait-for-postgres.sh
 
 # Create non-root user (optional)

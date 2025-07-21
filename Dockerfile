@@ -1,35 +1,26 @@
-FROM python:3.12-slim
+# Use Alpine variant for smaller footprint and pg_isready support
+FROM python:3.12-alpine
 
-# Set environment variables
-ENV PYTHONDONTWRITEBYTECODE=1
-ENV PYTHONUNBUFFERED=1
+# Install Postgres client (pg_isready) and build deps
+RUN apk add --no-cache postgresql-client gcc musl-dev libpq
 
-# Set the working directory in the container
 WORKDIR /app
 
-# Install system dependencies
-RUN apt-get update \
-    && apt-get upgrade -y \
-    && apt-get install -y --no-install-recommends \
-        postgresql-client \
-        build-essential \
-        libpq-dev \
-    && rm -rf /var/lib/apt/lists/*
-
-# Copy the requirements file into the container at /app
+# Copy and install Python dependencies
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy project
+# Copy source code and migration scripts
 COPY . .
 
-# Create a non-root user
-RUN useradd --create-home --shell /bin/bash app \
-    && chown -R app:app /app
+# Copy and enable wait‑for script
+COPY wait-for-postgres.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/wait-for-postgres.sh
+
+# Create non-root user (optional)
+RUN adduser -D app && chown -R app:app /app
 USER app
 
-# Expose port 8000 for the FastAPI application
 EXPOSE 8000
 
-# Command to run the FastAPI application using Uvicorn
-CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+ENTRYPOINT ["/usr/local/bin/wait-for-postgres.sh", "db", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]

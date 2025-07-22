@@ -53,3 +53,6 @@ services:
       POSTGRES_DB:   ${POSTGRES_DB:-fastapi_db}
     networks:
       - app-network
+
+volumes:
+  redis_data:

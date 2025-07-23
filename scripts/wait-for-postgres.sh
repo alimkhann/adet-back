@@ -5,7 +5,7 @@ DB_HOST="$1"
 shift
 
 echo "⏳ Waiting for Postgres at $DB_HOST..."
-until pg_isready -h "$DB_HOST" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+until pg_isready -h "$DB_HOST" -U "$POSTGRES_USER"; do
   sleep 2
 done
 

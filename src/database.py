@@ -8,7 +8,8 @@ DATABASE_URL = settings.database_url.replace("postgresql://", "postgresql+asyncp
 async_engine = create_async_engine(
     DATABASE_URL,
     echo=True,
-    future=True
+    future=True,
+    pool_pre_ping=True
 )
 
 Base = declarative_base()

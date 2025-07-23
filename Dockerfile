@@ -13,9 +13,9 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code and migration scripts
 COPY . .
 
-# Copy and enable wait‑for script
-COPY scripts/wait-for-postgres.sh /usr/local/bin/
-RUN chmod +x /usr/local/bin/wait-for-postgres.sh
+# Copy startup script
+COPY scripts/start.sh /usr/local/bin/
+RUN chmod +x /usr/local/bin/start.sh
 
 # Create non-root user (optional)
 RUN adduser -D app && chown -R app:app /app
@@ -23,4 +23,4 @@ USER app
 
 EXPOSE 8000
 
-ENTRYPOINT ["/usr/local/bin/wait-for-postgres.sh", "db", "uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8000"]
+ENTRYPOINT ["/usr/local/bin/start.sh"]

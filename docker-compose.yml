@@ -5,26 +5,6 @@ networks:
     driver: bridge
 
 services:
-  db:
-    image: postgres:16-alpine
-    restart: unless-stopped
-    environment:
-      POSTGRES_DB: fastapi_db
-      POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres
-    ports:
-      - "5432:5432"
-    volumes:
-      - pgdata:/var/lib/postgresql/data
-      - ./db-init:/docker-entrypoint-initdb.d
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-    networks:
-      - app-network
-
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -40,17 +20,14 @@ services:
     build: .
     restart: unless-stopped
     depends_on:
-      db:
-        condition: service_healthy
       redis:
         condition: service_started
     ports:
       - "8000:8000"
     env_file:
-      - ../adet-back.env
+      - .env
     networks:
       - app-network
 
 volumes:
-  pgdata:
   redis_data:

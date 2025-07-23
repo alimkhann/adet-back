@@ -40,9 +40,12 @@ def get_url():
     # Try to get from environment first (for Docker) or fallback to config
     database_url = os.getenv("DATABASE_URL", config.get_main_option("sqlalchemy.url"))
 
-        # Convert to async URL if needed
-    if database_url and database_url.startswith("postgresql://"):
+    # Convert to async URL if needed
+    if database_url:
+        if database_url.startswith("postgresql://"):
             database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+        elif database_url.startswith("postgres://"):
+            database_url = database_url.replace("postgres://", "postgresql+asyncpg://")
 
     return database_url
 

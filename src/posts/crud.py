@@ -296,8 +296,8 @@ class PostCRUD:
         from sqlalchemy import func
         result = await db.execute(
             select(func.count()).select_from(Post).where(
-                Post.user_id == user_id,
-                Post.privacy != "private"
+                Post.user_id == user_id
+                # Removed privacy filter - all posts should be counted in profile
             )
         )
         return result.scalar_one() or 0

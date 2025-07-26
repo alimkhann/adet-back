@@ -16,19 +16,22 @@ async def create_onboarding_answers_for_user(
 ):
     db_answer = await crud.get_onboarding_answer(db, user_id=current_user.id)
     if db_answer:
-        raise HTTPException(status_code=400, detail="Onboarding answers already exist for this user")
-    db_answer = await crud.create_onboarding_answer(db=db, answer=answer, user_id=current_user.id)
+        # Update existing onboarding answers instead of throwing error
+        db_answer = await crud.update_onboarding_answer(db=db, answer=answer, user_id=current_user.id)
+    else:
+        # Create new onboarding answers
+        db_answer = await crud.create_onboarding_answer(db=db, answer=answer, user_id=current_user.id)
 
-    # --- Create a Habit for the user from onboarding answer ---
-    habit_data = habits_schemas.HabitCreate(
-        name=answer.habit_name,
-        description=answer.habit_description,
-        frequency=answer.frequency,
-        validation_time=answer.validation_time,
-        difficulty=answer.difficulty,
-        proofStyle=answer.proof_style
-    )
-    await habits_crud.create_user_habit(db=db, habit_data=habit_data, user_id=current_user.id)
+        # --- Create a Habit for the user from onboarding answer (only for new users) ---
+        habit_data = habits_schemas.HabitCreate(
+            name=answer.habit_name,
+            description=answer.habit_description,
+            frequency=answer.frequency,
+            validation_time=answer.validation_time,
+            difficulty=answer.difficulty,
+            proofStyle=answer.proof_style
+        )
+        await habits_crud.create_user_habit(db=db, habit_data=habit_data, user_id=current_user.id)
 
     return db_answer
 

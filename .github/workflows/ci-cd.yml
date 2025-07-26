@@ -39,6 +39,6 @@ jobs:
             cd ~/adet-backend
             git pull origin main
             docker login adetappacr.azurecr.io -u ${{ secrets.ACR_USERNAME }} -p ${{ secrets.ACR_PASSWORD }}
-            docker-compose pull web
-            docker-compose up -d web
+            docker-compose pull
+            docker-compose up -d
             docker image prune -f

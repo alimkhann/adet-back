@@ -1,22 +1,29 @@
 """Add device_tokens table
 
-Revision ID: 001
-Revises:
+Revision ID: cf3d5b0ff921
+Revises: a1b2c3d4e5f6
 Create Date: 2024-12-19 10:00:00.000000
 
 """
 from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
+from sqlalchemy import inspect
 
 # revision identifiers, used by Alembic.
-revision = '001'
-down_revision = None
+revision = 'cf3d5b0ff921'
+down_revision = 'a1b2c3d4e5f6'
 branch_labels = None
 depends_on = None
 
 
 def upgrade() -> None:
+    # Check if device_tokens table already exists
+    inspector = inspect(op.get_bind())
+    if 'device_tokens' in inspector.get_table_names():
+        print("device_tokens table already exists, skipping creation")
+        return
+
     # Create device_tokens table
     op.create_table('device_tokens',
         sa.Column('id', sa.Integer(), nullable=False),
@@ -40,6 +47,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
+    # Check if device_tokens table exists before dropping
+    inspector = inspect(op.get_bind())
+    if 'device_tokens' not in inspector.get_table_names():
+        print("device_tokens table does not exist, skipping drop")
+        return
+
     # Drop indexes and constraints
     op.drop_constraint('uq_user_device_token', 'device_tokens', type_='unique')
     op.drop_index(op.f('ix_device_tokens_device_token'), table_name='device_tokens')

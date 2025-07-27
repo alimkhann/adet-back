@@ -13,4 +13,4 @@ python-dotenv==1.0.0
 psycopg2-binary==2.9.9
 redis==5.0.1
 celery==5.3.4
-apns2==0.7.1
+aioapns==3.2

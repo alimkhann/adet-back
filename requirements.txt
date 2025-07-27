@@ -17,3 +17,4 @@ aioapns==3.2
 aiofiles==23.2.1
 azure-storage-blob==12.19.0
 svix==1.15.0
+google-generativeai==0.3.2

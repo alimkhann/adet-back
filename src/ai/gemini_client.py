@@ -3,229 +3,215 @@ import logging
 import json
 from typing import Optional, Type
 from pydantic import BaseModel
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+from google.genai.types import (
+    GenerateContentConfig,
+    LiveConnectConfig,
+    Content,
+    Part,
+    SpeechConfig,
+    VoiceConfig,
+    PrebuiltVoiceConfig,
+)
 
 logger = logging.getLogger(__name__)
 
-class GeminiClient:
+class GeminiAIClient:
+    """Client for interacting with Google Gemini via google-genai SDK"""
+
     def __init__(self):
-        """
-        Initialize the Gemini client with configuration from environment variables.
-        """
-        api_key = os.getenv('GOOGLE_AI_API_KEY')
-        if not api_key:
-            logger.warning("GOOGLE_AI_API_KEY not found in environment variables")
+        self.api_key = os.getenv("GEMINI_API_KEY")
+        self.model_name = os.getenv("GOOGLE_GENAI_MODEL", "gemini-2.5-flash")
+        if not self.api_key:
+            raise ValueError("GEMINI_API_KEY environment variable is required")
+        # VertexAI=False uses the direct GenAI endpoint
+        self.client = genai.Client(api_key=self.api_key, vertexai=False)
+        logger.info(f"Gemini client initialized with model: {self.model_name}")
 
-        # Configure the Gemini client
-        genai.configure(api_key=api_key)
-
-        # Default model
-        self.model_name = "gemini-1.5-flash"
-
-        # Initialize the model
-        self.model = genai.GenerativeModel(self.model_name)
-
-        logger.info(f"Initialized Gemini client with model: {self.model_name}")
-
-    def generate_text(
+    async def generate_text(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        max_tokens: int = 1000,
         temperature: float = 0.7,
-        response_model: Optional[Type[BaseModel]] = None
+        max_tokens: int = 5000,
+        system_prompt: Optional[str] = None
     ) -> str:
-        """
-        Generate text using the Gemini model.
-
-        Args:
-            prompt: The user prompt
-            system_prompt: Optional system prompt
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
-            response_model: Optional Pydantic model for structured output
-
-        Returns:
-            Generated text response
-        """
-        try:
-            # Prepare the generation config
-            generation_config = genai.types.GenerationConfig(
-                max_output_tokens=max_tokens,
-                temperature=temperature,
+        """Generate text using Gemini model"""
+        full_prompt = f"{system_prompt}\n\n{prompt}" if system_prompt else prompt
+        resp = self.client.models.generate_content(
+                model=self.model_name,
+                contents=[full_prompt],
+            config=GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                )
             )
+        if not getattr(resp, "text", None):
+            logger.error("Empty response from Gemini API: %r", resp)
+            raise ValueError("Received empty response from Gemini API")
+        return resp.text
 
-            # If we need structured output
-            if response_model:
-                generation_config.response_mime_type = "application/json"
-                generation_config.response_schema = response_model
-
-            # Prepare the prompt with system instruction if provided
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
-
-            # Generate content
-            response = self.model.generate_content(
-                full_prompt,
-                generation_config=generation_config
-            )
-
-            if response.text:
-                return response.text
-            else:
-                logger.error("No text in response")
-                return ""
-
-        except Exception as e:
-            logger.error(f"Error generating text: {e}")
-            return ""
-
-    def generate_text_stream(
+    async def generate_structured_response(
         self,
         prompt: str,
-        system_prompt: Optional[str] = None,
-        max_tokens: int = 1000,
-        temperature: float = 0.7
-    ):
-        """
-        Generate text using streaming response.
-
-        Args:
-            prompt: The user prompt
-            system_prompt: Optional system prompt
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
-
-        Yields:
-            Text chunks as they are generated
-        """
-        try:
-            # Prepare the generation config
-            generation_config = genai.types.GenerationConfig(
-                max_output_tokens=max_tokens,
+        response_schema: Type[BaseModel],
+        temperature: float = 0.3,
+        max_tokens: int = 5000,
+        system_prompt: Optional[str] = None
+    ) -> BaseModel:
+        """Generate structured response using a Pydantic schema"""
+        schema_json = response_schema.model_json_schema()
+        instructions = (
+            "IMPORTANT: Respond with ONLY a valid JSON object that matches this schema. "
+            "Do not include any prose or markdown.\n\n"
+            f"{schema_json}"
+        )
+        full_prompt = "\n\n".join(filter(None, [system_prompt, prompt, instructions]))
+        resp = self.client.models.generate_content(
+            model=self.model_name,
+            contents=[full_prompt],
+            config=GenerateContentConfig(
                 temperature=temperature,
+                max_output_tokens=max_tokens,
             )
-
-            # Prepare the prompt with system instruction if provided
-            full_prompt = prompt
-            if system_prompt:
-                full_prompt = f"System: {system_prompt}\n\nUser: {prompt}"
-
-            # Generate content with streaming
-            response = self.model.generate_content(
-                full_prompt,
-                generation_config=generation_config,
-                stream=True
-            )
-
-            for chunk in response:
-                if chunk.text:
-                    yield chunk.text
-
+        )
+        text = resp.text or ""
+        # strip markdown code fences if present
+        if text.strip().startswith("```"):
+            text = text.strip().strip("```json").strip("```").strip()
+        # attempt to grab last JSON object
+        if text.count("{") > 1:
+            objs, cur, depth = [], "", 0
+            for c in text:
+                cur += c
+                if c == "{": depth += 1
+                if c == "}":
+                    depth -= 1
+                    if depth == 0:
+                        objs.append(cur)
+                        cur = ""
+            if objs:
+                text = objs[-1]
+        # close dangling braces
+        if text.count("{") > text.count("}"):
+            text += "}"
+        try:
+            data = json.loads(text)
+            return response_schema.model_validate(data)
         except Exception as e:
-            logger.error(f"Error generating streaming text: {e}")
-            yield ""
+            logger.error("Failed to parse/validate JSON response: %s\nRaw: %s", e, text)
+            raise
 
-    def analyze_image_with_text(
+    def analyze_image(
         self,
-        prompt: str,
         image_bytes: bytes,
-        system_prompt: Optional[str] = None,
-        max_tokens: int = 1000,
-        temperature: float = 0.7
+        prompt: str,
+        temperature: float = 0.3,
+        max_tokens: int = 500,  # Reduced from 1000 for faster responses
+        system_prompt: Optional[str] = None
     ) -> str:
-        """
-        Analyze an image with text prompt using Gemini Vision.
-
-        Args:
-            prompt: The text prompt
-            image_bytes: Image data as bytes
-            system_prompt: Optional system prompt
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
-
-        Returns:
-            Analysis result as text
-        """
+        """Analyze an image with Gemini Vision and return the response text."""
         try:
-            # Prepare the generation config
-            generation_config = genai.types.GenerationConfig(
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-            )
-
-            # Create parts for the content
-            parts = []
+            # Use the correct google-genai SDK method for vision
+            contents = []
 
             # Add system prompt if provided
             if system_prompt:
-                parts.append(f"System: {system_prompt}\n\n")
+                contents.append(Part(text=system_prompt))
 
-            # Add the text prompt
-            parts.append(prompt)
+            # Add the image data
+            contents.append(Part(inline_data={
+                "mime_type": "image/jpeg",  # Assuming JPEG, could be PNG
+                "data": image_bytes
+            }))
 
-            # Add the image
-            import PIL.Image
-            import io
+            # Add the user prompt
+            contents.append(Part(text=prompt))
 
-            # Convert bytes to PIL Image
-            image = PIL.Image.open(io.BytesIO(image_bytes))
-            parts.append(image)
-
-            # Generate content using the model
-            response = self.model.generate_content(
-                parts,
-                generation_config=generation_config
+            # Generate content using the client
+            resp = self.client.models.generate_content(
+                model="gemini-1.5-pro",  # Use the standard model, not vision-specific
+                contents=contents,
+                config=GenerateContentConfig(
+                    temperature=temperature,
+                    max_output_tokens=max_tokens,
+                )
             )
 
-            if response.text:
-                return response.text
-            else:
-                logger.error("No text in response")
-                return ""
+            if not getattr(resp, "text", None):
+                logger.error("Empty response from Gemini Vision: %r", resp)
+                raise ValueError("Received empty response from Gemini Vision API")
+
+            return resp.text
 
         except Exception as e:
-            logger.error(f"Error analyzing image: {e}")
-            return ""
+            logger.error(f"Error in analyze_image: {e}")
+            raise ValueError(f"Gemini Vision analysis failed: {e}")
 
-    def analyze_audio_with_text(
+    async def analyze_audio(
         self,
-        prompt: str,
         audio_bytes: bytes,
-        system_prompt: Optional[str] = None,
+        prompt: str,
+        temperature: float = 0.3,
         max_tokens: int = 1000,
-        temperature: float = 0.7
+        system_prompt: Optional[str] = None
     ) -> str:
         """
-        Analyze audio with text prompt.
-
-        Args:
-            prompt: The text prompt
-            audio_bytes: Audio data as bytes
-            system_prompt: Optional system prompt
-            max_tokens: Maximum tokens to generate
-            temperature: Temperature for generation
-
-        Returns:
-            Analysis result as text
+        Analyze an audio clip using Gemini Live API in multimodal mode.
+        Returns the model's text response once the turn completes.
         """
-        try:
-            # Note: For audio analysis, we would need to upload the file first
-            # For now, return a placeholder
-            logger.warning("Audio analysis not yet implemented")
-            return "Audio analysis not yet implemented in this version."
+        # we spin up a live session with TEXT responses
+        config = LiveConnectConfig(
+            response_modalities=["TEXT"],
+            temperature=temperature,
+        )
+        # if you wanted TTS output, add response_modalities=["AUDIO"] + SpeechConfig(...)
+        async with self.client.aio.live.connect(
+            model=f"{self.model_name}-live-preview",
+            config=config
+        ) as session:
+            # first send any system instructions
+            if system_prompt:
+                await session.send_client_content(
+                    turns=Content(role="system", parts=[Part(text=system_prompt)])
+                )
+            # then send your audio + prompt
+            await session.send_client_content(
+                turns=Content(
+                    role="user",
+                    parts=[
+                        Part(inline_data={"mime_type": "audio/wav", "data": audio_bytes}),
+                        Part(text=prompt),
+                    ]
+                )
+            )
+            # collect until turn_complete
+            pieces = []
+            async for msg in session.receive():
+                if msg.text:
+                    pieces.append(msg.text)
+                if getattr(msg.server_content, "turn_complete", False):
+                    break
+            return "".join(pieces)
 
-        except Exception as e:
-            logger.error(f"Error analyzing audio: {e}")
-            return ""
+    async def analyze_audio_file(
+        self,
+        path: str,
+        prompt: str,
+        **kwargs
+    ) -> str:
+        """Convenience: read from disk then call analyze_audio."""
+        with open(path, "rb") as f:
+            b = f.read()
+        return await self.analyze_audio(b, prompt, **kwargs)
 
-# Global client instance
-_client = None
 
-def get_gemini_client() -> GeminiClient:
-    """Get the global Gemini client instance."""
-    global _client
-    if _client is None:
-        _client = GeminiClient()
-    return _client
+# module‐level helpers
+
+gemini_client: Optional[GeminiAIClient] = None
+
+def get_gemini_client() -> GeminiAIClient:
+    global gemini_client
+    if gemini_client is None:
+        gemini_client = GeminiAIClient()
+    return gemini_client

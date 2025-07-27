@@ -26,6 +26,8 @@ services:
       - "8000:8000"
     env_file:
       - .env
+    volumes:
+      - /opt/adet-backend/AuthKey_95SGG425BQ.p8:/opt/adet-backend/AuthKey_95SGG425BQ.p8:ro
     networks:
       - app-network
 

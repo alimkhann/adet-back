@@ -13,6 +13,10 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy source code and migration scripts
 COPY . .
 
+# Copy APNs key file and set permissions
+COPY AuthKey_95SGG425BQ.p8 /app/
+RUN chmod 600 /app/AuthKey_95SGG425BQ.p8
+
 # Copy startup script
 COPY scripts/start.sh /usr/local/bin/
 RUN chmod +x /usr/local/bin/start.sh

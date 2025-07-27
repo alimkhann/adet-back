@@ -168,3 +168,12 @@ async def get_my_post_count(
 ):
     count = await PostCRUD.get_user_post_count(db, current_user.id)
     return {"post_count": count}
+
+@router.get("/me/streak-freezers", response_model=dict)
+async def get_my_streak_freezers(
+    current_user = Depends(get_current_user)
+):
+    """
+    Get the current user's streak freezers count.
+    """
+    return {"streak_freezers": current_user.streak_freezers}

@@ -10,6 +10,7 @@ class OnboardingAnswerBase(BaseModel):
 
     class Config:
         allow_population_by_field_name = True
+        populate_by_name = True
 
 class OnboardingAnswerCreate(OnboardingAnswerBase):
     pass
@@ -17,6 +18,9 @@ class OnboardingAnswerCreate(OnboardingAnswerBase):
 class OnboardingAnswer(OnboardingAnswerBase):
     id: int
     user_id: int
+    proofStyle: str = Field(alias="proof_style")  # Explicit field for response
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+        allow_population_by_field_name = True
+        populate_by_name = True

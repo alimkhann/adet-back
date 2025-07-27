@@ -21,6 +21,7 @@ class UserDAO:
         """
         Retrieves a user by their Clerk ID. If the user does not exist,
         it creates a new one with the provided Clerk ID, email, and username.
+        Uses a more robust approach to handle race conditions.
         """
         logger.info(f"Attempting to get or create user with clerk_id: {clerk_id}")
         try:
@@ -38,12 +39,20 @@ class UserDAO:
                     logger.info(f"Updating email for user {user.id} to {email}")
                     user.email = email
                     updated = True
+
+                # Handle username update more carefully to avoid conflicts
                 if username:
                     username = username.lower()
-                if username and user.username != username:
-                    logger.info(f"Updating username for user {user.id} to {username}")
-                    user.username = username.lower() if username else None
-                    updated = True
+                    if user.username != username:
+                        # Check if the new username is already taken by another user
+                        existing_user_with_username = await UserDAO.get_user_by_username(username, db)
+                        if existing_user_with_username and existing_user_with_username.id != user.id:
+                            logger.warning(f"Username {username} is already taken by user {existing_user_with_username.id}. Skipping username update.")
+                            # Don't update username if it's already taken
+                        else:
+                            logger.info(f"Updating username for user {user.id} to {username}")
+                            user.username = username
+                            updated = True
 
                 if updated:
                     await db.commit()
@@ -52,7 +61,12 @@ class UserDAO:
 
             # If user does not exist, create a new one
             logger.info(f"User with clerk_id {clerk_id} not found. Creating new user.")
-            new_user = User(clerk_id=clerk_id, email=email, username=username.lower() if username else None)
+            new_user = User(
+                clerk_id=clerk_id,
+                email=email,
+                username=username.lower() if username else None,
+                streak_freezers=2  # Explicitly set streak freezers for new users
+            )
             db.add(new_user)
             logger.info("Committing new user to the database...")
             await db.commit()
@@ -61,9 +75,50 @@ class UserDAO:
             logger.info(f"Successfully created new user with id: {new_user.id}")
             return new_user
 
-        except IntegrityError:  # Should not happen with get-or-create logic, but as a safeguard
+        except IntegrityError as e:
             await db.rollback()
-            raise UserAlreadyExistsException(f"User with clerk_id {clerk_id} already exists.")
+            # If we get a duplicate key error, try to fetch the existing user
+            if "duplicate key value violates unique constraint" in str(e) and "ix_users_clerk_id" in str(e):
+                logger.info(f"Duplicate key error for clerk_id {clerk_id}. Attempting to fetch existing user.")
+                try:
+                    query = select(User).where(User.clerk_id == clerk_id)
+                    result = await db.execute(query)
+                    existing_user = result.scalars().first()
+                    if existing_user:
+                        logger.info(f"Successfully retrieved existing user with id: {existing_user.id}")
+                        return existing_user
+                    else:
+                        raise UserAlreadyExistsException(f"User with clerk_id {clerk_id} already exists but could not be retrieved.")
+                except Exception as fetch_error:
+                    logger.error(f"Error fetching existing user after duplicate key error: {fetch_error}")
+                    raise UserAlreadyExistsException(f"User with clerk_id {clerk_id} already exists.")
+            elif "duplicate key value violates unique constraint" in str(e) and "ix_users_username" in str(e):
+                logger.warning(f"Username {username} is already taken. Attempting to create user with different username.")
+                # Try to create user with a modified username
+                if username:
+                    import uuid
+                    unique_username = f"{username}_{str(uuid.uuid4())[:8]}"
+                    logger.info(f"Trying to create user with unique username: {unique_username}")
+                    try:
+                        new_user = User(
+                            clerk_id=clerk_id,
+                            email=email,
+                            username=unique_username,
+                            streak_freezers=2  # Explicitly set streak freezers for new users
+                        )
+                        db.add(new_user)
+                        await db.commit()
+                        await db.refresh(new_user)
+                        logger.info(f"Successfully created new user with id: {new_user.id} and username: {unique_username}")
+                        return new_user
+                    except IntegrityError as retry_error:
+                        await db.rollback()
+                        logger.error(f"Failed to create user with unique username: {retry_error}")
+                        raise UserAlreadyExistsException(f"Failed to create user: username conflict and retry failed.")
+                else:
+                    raise UserAlreadyExistsException(f"Failed to create user: username is required but not provided.")
+            else:
+                raise UserAlreadyExistsException(f"User with clerk_id {clerk_id} already exists.")
         except Exception as e:
             await db.rollback()
             raise DatabaseException(f"get_or_create_user_by_clerk_id: {str(e)}")

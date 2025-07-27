@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 from src.auth.dependencies import get_current_user
@@ -8,7 +9,7 @@ from .service import NotificationService
 from .models import DeviceToken
 import logging
 
-router = APIRouter(prefix="/notifications", tags=["Notifications"])
+router = APIRouter(tags=["Notifications"])
 notification_service = NotificationService()
 logger = logging.getLogger(__name__)
 
@@ -55,6 +56,9 @@ async def send_test_notification(
     db: AsyncSession = Depends(get_async_db),
     current_user: User = Depends(get_current_user)
 ):
+    # Add 5-second delay to allow user to put app in background
+    await asyncio.sleep(5)
+
     title = "Test Notification"
     body = "This is a test push notification from ädet backend."
     sent = await notification_service.send_push(

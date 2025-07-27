@@ -155,3 +155,5 @@ Thumbs.db
 grand-sphere-v9.json
 
 .cursorignoreuploads/
+
+*.p8

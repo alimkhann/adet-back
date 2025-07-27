@@ -34,7 +34,6 @@ async def get_async_db() -> AsyncGenerator[AsyncSession, None]:
         try:
             print(">>>> get_async_db about to yield session")
             yield session
-            await session.commit()
         except Exception:
             await session.rollback()
             raise

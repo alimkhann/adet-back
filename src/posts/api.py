@@ -181,14 +181,27 @@ async def get_feed_posts(
             current_user_id=current_user.id
         )
 
+        # Fetch fresh user data for all posts
+        fresh_user_data = await PostCRUD._get_fresh_user_data_for_posts(db, posts_with_state)
+
         # Convert to response format
         posts_read = []
         for post in posts_with_state:
-            user_basic = UserBasic(
-                id=post.user.id,
-                username=post.user.username or "",
-                profile_image_url=getattr(post.user, 'profile_image_url', None)
-            )
+            # Use fresh user data instead of cached relationship data
+            fresh_user = fresh_user_data.get(post.user_id)
+            if fresh_user:
+                user_basic = UserBasic(
+                    id=fresh_user.id,
+                    username=fresh_user.username or "",
+                    profile_image_url=getattr(fresh_user, 'profile_image_url', None)
+                )
+            else:
+                # Fallback to cached data if fresh data not available
+                user_basic = UserBasic(
+                    id=post.user.id,
+                    username=post.user.username or "",
+                    profile_image_url=getattr(post.user, 'profile_image_url', None)
+                )
 
             privacy = post.privacy
             proof_urls = _get_proof_urls_with_privacy(post, privacy)
@@ -254,16 +267,31 @@ async def get_my_posts(
             current_user_id=current_user.id
         )
 
+        # Fetch fresh user data for all posts
+        fresh_user_data = await PostCRUD._get_fresh_user_data_for_posts(db, posts_with_state)
+
         # Convert to response format
         posts_read = []
         for post in posts_with_state:
             # DEBUG: Print ORM post dict
             logger.info(f"[DEBUG] ORM Post dict: {post.__dict__}")
-            user_basic = UserBasic(
-                id=post.user.id,
-                username=post.user.username or "",
-                profile_image_url=getattr(post.user, 'profile_image_url', None)
-            )
+
+            # Use fresh user data instead of cached relationship data
+            fresh_user = fresh_user_data.get(post.user_id)
+            if fresh_user:
+                user_basic = UserBasic(
+                    id=fresh_user.id,
+                    username=fresh_user.username or "",
+                    profile_image_url=getattr(fresh_user, 'profile_image_url', None)
+                )
+            else:
+                # Fallback to cached data if fresh data not available
+                user_basic = UserBasic(
+                    id=post.user.id,
+                    username=post.user.username or "",
+                    profile_image_url=getattr(post.user, 'profile_image_url', None)
+                )
+
             privacy = post.privacy
             proof_urls = _get_proof_urls_with_privacy(post, privacy)
             post_read = PostRead(
@@ -328,12 +356,24 @@ async def get_post(
     )
     post = posts_with_state[0]
 
+    # Fetch fresh user data for the post
+    fresh_user_data = await PostCRUD._get_fresh_user_data_for_posts(db, [post])
+    fresh_user = fresh_user_data.get(post.user_id)
+
     # Convert to response format
-    user_basic = UserBasic(
-        id=post.user.id,
-        username=post.user.username or "",
-        profile_image_url=getattr(post.user, 'profile_image_url', None)
-    )
+    if fresh_user:
+        user_basic = UserBasic(
+            id=fresh_user.id,
+            username=fresh_user.username or "",
+            profile_image_url=getattr(fresh_user, 'profile_image_url', None)
+        )
+    else:
+        # Fallback to cached data if fresh data not available
+        user_basic = UserBasic(
+            id=post.user.id,
+            username=post.user.username or "",
+            profile_image_url=getattr(post.user, 'profile_image_url', None)
+        )
 
     privacy = post.privacy
     proof_urls = _get_proof_urls_with_privacy(post, privacy)

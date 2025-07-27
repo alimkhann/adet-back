@@ -17,6 +17,33 @@ class PostCRUD:
     """CRUD operations for posts with privacy filtering"""
 
     @staticmethod
+    async def _get_fresh_user_data_for_posts(
+        db: AsyncSession,
+        posts: List[Post]
+    ) -> dict:
+        """
+        Fetch fresh user data for a list of posts to replace cached relationship data.
+        Returns a dict mapping user_id to fresh user data.
+        """
+        if not posts:
+            return {}
+
+        # Get unique user IDs from posts
+        user_ids = list(set(post.user_id for post in posts))
+
+        # Fetch fresh user data
+        result = await db.execute(
+            select(UserModel)
+            .where(UserModel.id.in_(user_ids))
+        )
+        fresh_users = result.scalars().all()
+
+        # Create mapping of user_id to fresh user data
+        user_data_map = {user.id: user for user in fresh_users}
+
+        return user_data_map
+
+    @staticmethod
     async def create_post(
         db: AsyncSession,
         user_id: int,

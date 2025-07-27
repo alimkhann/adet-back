@@ -5,6 +5,7 @@ import mimetypes
 import httpx
 import os
 import uuid
+import logging
 from urllib.parse import urlparse, urlunparse
 
 from src.auth.dependencies import get_current_user
@@ -18,12 +19,36 @@ from src.services.azure_storage import azure_storage
 from src.services.file_upload import file_upload_service
 from src.posts.crud import PostCRUD
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
 def get_base_blob_url(url):
     parsed = urlparse(url)
     return urlunparse(parsed._replace(query="", fragment=""))
+
+
+async def _invalidate_user_data_cache(user_id: int):
+    """
+    Invalidate any cached user data to ensure posts show fresh user information.
+    This ensures that when a user updates their profile, all posts immediately show the new data.
+    """
+    try:
+        # Clear any Redis cache for user data if Redis is available
+        from src.services.redis_service import redis_service
+        if redis_service.is_connected():
+            # Clear user-specific cache keys
+            cache_keys = [
+                f"user:{user_id}:profile",
+                f"user:{user_id}:posts",
+                f"posts:user:{user_id}",
+                f"feed:user:{user_id}"
+            ]
+            for key in cache_keys:
+                redis_service.redis_client.delete(key)
+            logger.info(f"Invalidated user data cache for user {user_id}")
+    except Exception as e:
+        logger.warning(f"Failed to invalidate user data cache for user {user_id}: {e}")
 
 
 @router.get("/me", response_model=UserSchema, summary="Get Current User Profile")
@@ -87,6 +112,10 @@ async def update_profile(
             username=profile_update.username,
             bio=profile_update.bio
         )
+
+        # Invalidate user data cache to ensure posts show fresh data
+        await _invalidate_user_data_cache(current_user.id)
+
         return updated_user
     except UserNotFoundException as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
@@ -130,6 +159,10 @@ async def upload_profile_image(
     if updated_user.profile_image_url:
         signed_url = file_upload_service.generate_permanent_signed_url(updated_user.profile_image_url, container=file_upload_service.pfp_container_name)
         updated_user.profile_image_url = signed_url
+
+    # Invalidate user data cache to ensure posts show fresh data
+    await _invalidate_user_data_cache(current_user.id)
+
     return updated_user
 
 

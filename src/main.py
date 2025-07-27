@@ -74,7 +74,7 @@ api_router.include_router(friends_router, prefix="/friends", tags=["Friends"])
 api_router.include_router(chats_router, prefix="/chats", tags=["Chats"])
 api_router.include_router(posts_router, tags=["Posts"])
 api_router.include_router(support_router, prefix="/support", tags=["Support"])
-api_router.include_router(notifications_router, tags=["Notifications"])
+api_router.include_router(notifications_router, prefix="/notifications", tags=["Notifications"])
 
 app.include_router(api_router)
 app.include_router(webhooks_router, tags=["webhooks"])

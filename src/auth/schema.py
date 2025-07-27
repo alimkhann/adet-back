@@ -15,6 +15,7 @@ class UserSchema(BaseModel):
     created_at: datetime
     updated_at: Optional[datetime] = None
     plan: str
+    streak_freezers: int
 
     class Config:
         from_attributes = True

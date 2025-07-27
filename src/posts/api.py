@@ -391,6 +391,7 @@ async def update_post(
 
     # If privacy is changing, check if streak should be incremented
     if privacy_changing:
+        logger.info(f"Privacy changing from 'private' to '{update_data.privacy.value}' for post {post_id} (habit_id: {post.habit_id})")
         # Check if there is already a shared post for this habit and date
         from .models import Post
         from sqlalchemy import select
@@ -400,7 +401,8 @@ async def update_post(
                 Post.user_id == current_user.id,
                 Post.habit_id == post.habit_id,
                 Post.assigned_date == post.assigned_date,
-                Post.privacy.in_(["friends", "close_friends"])
+                Post.privacy.in_(["friends", "close_friends"]),
+                Post.id != post_id  # Exclude the current post being updated
             )
         )
         already_shared = existing_shared.scalars().first()
@@ -408,8 +410,14 @@ async def update_post(
             # Increment streak for this habit
             habit = await get_habit(db, habit_id=post.habit_id, user_id=current_user.id)
             if habit:
-                new_streak = (habit.streak or 0) + 1
+                old_streak = habit.streak or 0
+                new_streak = old_streak + 1
+                logger.info(f"Incrementing habit {habit.id} streak from {old_streak} to {new_streak}")
                 await update_habit_streak(db, habit_id=habit.id, streak_count=new_streak)
+            else:
+                logger.warning(f"Habit {post.habit_id} not found for user {current_user.id}")
+        else:
+            logger.info(f"Already shared post exists for habit {post.habit_id} on date {post.assigned_date}, not incrementing streak")
 
     return PostActionResponse(
         success=True,

@@ -62,21 +62,23 @@ class NotificationService:
     ) -> DeviceToken:
         """Register or update a device token for push notifications."""
         try:
-            # Check if token already exists for this user
+            # Check if token already exists (globally, not just for this user)
             stmt = select(DeviceToken).where(
-                DeviceToken.user_id == user_id,
                 DeviceToken.device_token == device_token
             )
             result = await db.execute(stmt)
             existing_token = result.scalar_one_or_none()
 
             if existing_token:
-                # Update existing token
+                # Update existing token with new user (device might have switched users)
+                existing_token.user_id = user_id
+                existing_token.platform = platform
                 existing_token.app_version = app_version
                 existing_token.system_version = system_version
                 existing_token.updated_at = datetime.utcnow()
                 await db.commit()
                 await db.refresh(existing_token)
+                logger.info(f"Updated existing device token for user {user_id}")
                 return existing_token
             else:
                 # Create new token
@@ -90,6 +92,7 @@ class NotificationService:
                 db.add(new_token)
                 await db.commit()
                 await db.refresh(new_token)
+                logger.info(f"Created new device token for user {user_id}")
                 return new_token
 
         except IntegrityError as e:

@@ -584,17 +584,19 @@ async def check_and_mark_expired_tasks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check expired tasks: {str(e)}")
 
-@router.post("/habits/{habit_id}/mark-missed-no-task")
+@router.post("/{habit_id}/mark-missed-no-task")
 async def mark_habit_missed_no_task(
     habit_id: int,
     db: AsyncSession = Depends(get_async_db),
     current_user: UserModel = Depends(get_current_user)
 ):
     """Mark a habit as missed when no task was generated but window expired"""
+    logger.info(f"[DEBUG] mark_habit_missed_no_task called for habit {habit_id}, user {current_user.id}")
     try:
         # Get habit to verify ownership
         habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
         if not habit:
+            logger.error(f"[DEBUG] Habit {habit_id} not found for user {current_user.id}")
             raise HTTPException(status_code=404, detail="Habit not found")
 
         # Check if there's already a task for today
@@ -603,10 +605,13 @@ async def mark_habit_missed_no_task(
         existing_task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id, for_date=today)
 
         if existing_task:
+            logger.warning(f"[DEBUG] Task already exists for habit {habit_id} on {today}")
             raise HTTPException(status_code=400, detail="Task already exists for today")
 
         # Handle streak freezer logic for missed habit (no task generated)
         user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+        logger.info(f"[DEBUG] User {current_user.id} has {user_freezers} streak freezers")
+
         if user_freezers > 0:
             await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
             logger.info(f"Consumed streak freezer for user {current_user.id}, habit {habit_id}. Freezers remaining: {user_freezers - 1}")
@@ -614,16 +619,19 @@ async def mark_habit_missed_no_task(
             await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
             logger.info(f"Reset streak to 0 for user {current_user.id}, habit {habit_id}")
 
-        return {
+        response = {
             "success": True,
             "message": "Habit marked as missed (no task generated)",
             "freezers_consumed": user_freezers > 0,
             "streak_reset": user_freezers == 0
         }
+        logger.info(f"[DEBUG] Returning response: {response}")
+        return response
 
     except HTTPException:
         raise
     except Exception as e:
+        logger.error(f"[DEBUG] Exception in mark_habit_missed_no_task: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Failed to mark habit as missed: {str(e)}")
 
 @router.get("/tasks/{task_id}/proof-url")

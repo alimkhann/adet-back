@@ -584,6 +584,48 @@ async def check_and_mark_expired_tasks(
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to check expired tasks: {str(e)}")
 
+@router.post("/habits/{habit_id}/mark-missed-no-task")
+async def mark_habit_missed_no_task(
+    habit_id: int,
+    db: AsyncSession = Depends(get_async_db),
+    current_user: UserModel = Depends(get_current_user)
+):
+    """Mark a habit as missed when no task was generated but window expired"""
+    try:
+        # Get habit to verify ownership
+        habit = await crud.get_habit(db=db, habit_id=habit_id, user_id=current_user.id)
+        if not habit:
+            raise HTTPException(status_code=404, detail="Habit not found")
+
+        # Check if there's already a task for today
+        from datetime import date
+        today = date.today()
+        existing_task = await crud.get_today_task(db=db, habit_id=habit_id, user_id=current_user.id, for_date=today)
+
+        if existing_task:
+            raise HTTPException(status_code=400, detail="Task already exists for today")
+
+        # Handle streak freezer logic for missed habit (no task generated)
+        user_freezers = await crud.get_streak_freezers_by_user(db=db, user_id=current_user.id)
+        if user_freezers > 0:
+            await crud.decrement_streak_freezer_for_user(db=db, user_id=current_user.id)
+            logger.info(f"Consumed streak freezer for user {current_user.id}, habit {habit_id}. Freezers remaining: {user_freezers - 1}")
+        else:
+            await crud.update_habit_streak(db=db, habit_id=habit.id, streak_count=0)
+            logger.info(f"Reset streak to 0 for user {current_user.id}, habit {habit_id}")
+
+        return {
+            "success": True,
+            "message": "Habit marked as missed (no task generated)",
+            "freezers_consumed": user_freezers > 0,
+            "streak_reset": user_freezers == 0
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to mark habit as missed: {str(e)}")
+
 @router.get("/tasks/{task_id}/proof-url")
 async def get_fresh_proof_url(
     task_id: int,
